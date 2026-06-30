@@ -1,0 +1,17 @@
+[project]
+name = "video2audio"
+version = "0.1.0"
+description = "CLI for extracting audio from video files with ffmpeg."
+readme = "README.md"
+authors = [
+    { name = "chengqiyun", email = "chengqiyun@kuaishou.com" },
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+video2audio = "video2audio:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"

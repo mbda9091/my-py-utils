@@ -1,0 +1,10 @@
+input = "input.mp4"
+# Use input_dir instead of input to convert all supported videos in a directory.
+# input_dir = "videos"
+output = "output/audio.m4a"
+format = "m4a"
+bitrate = "192k"
+sample_rate = 44100
+channels = 2
+overwrite = true
+ffmpeg = "ffmpeg"
