@@ -8,6 +8,7 @@ members = [
     "mac-cache-cleaner",
     "my-py-utils",
     "my-py-utils-common",
+    "node-modules-cleaner",
     "video2audio",
 ]
 
@@ -70,6 +71,11 @@ dev = [
 name = "my-py-utils-common"
 version = "0.1.0"
 source = { editable = "packages/my-py-utils-common" }
+
+[[package]]
+name = "node-modules-cleaner"
+version = "0.1.0"
+source = { editable = "packages/node-modules-cleaner" }
 
 [[package]]
 name = "nodeenv"

@@ -10,6 +10,7 @@ packages/
   hello-cli/            Small example CLI package
   video2audio/          CLI for extracting audio from video files with ffmpeg
   mac-cache-cleaner/    CLI for cleaning macOS build caches
+  node-modules-cleaner/ CLI for recursively deleting node_modules directories
 tests/                  Workspace-level tests
 ```
 
@@ -27,6 +28,7 @@ uv run pyright
 uv run --package hello-cli hello-util --name Codex
 uv run --package video2audio video2audio --help
 uv run --package mac-cache-cleaner mac-cache-cleaner --help
+uv run --package node-modules-cleaner node-modules-cleaner ~/Code --dry-run
 ```
 
 ## Add A New CLI
