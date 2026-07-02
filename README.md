@@ -9,6 +9,7 @@ packages/
   my-py-utils-common/   Shared helpers used by CLI packages
   hello-cli/            Small example CLI package
   video2audio/          CLI for extracting audio from video files with ffmpeg
+  mac-cache-cleaner/    CLI for cleaning macOS build caches
 tests/                  Workspace-level tests
 ```
 
@@ -25,6 +26,7 @@ uv run ruff format .
 uv run pyright
 uv run --package hello-cli hello-util --name Codex
 uv run --package video2audio video2audio --help
+uv run --package mac-cache-cleaner mac-cache-cleaner --help
 ```
 
 ## Add A New CLI
