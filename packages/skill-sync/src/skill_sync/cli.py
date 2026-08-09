@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from skill_sync.catalog import list_skills
 from skill_sync.config import init_config, read_config, read_installations
-from skill_sync.errors import SkillSyncError
+from skill_sync.errors import SkillSyncError, TargetSkillExistsError
 from skill_sync.git_repo import repository_status, sync_repository
 from skill_sync.installer import install_skill
 from skill_sync.publisher import publish_skill
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import TextIO
 
+    from skill_sync.config import Config
+    from skill_sync.installer import InstallResult
     from skill_sync.security import SecurityFinding
 
 
@@ -46,7 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--no-push", action="store_true")
 
     install_parser = subparsers.add_parser("install", help="Install a registry skill locally.")
-    install_parser.add_argument("skill_name")
+    install_parser.add_argument("skill_name", nargs="?")
+    install_parser.add_argument("--all", action="store_true", dest="install_all")
     install_parser.add_argument("--target", required=True)
     install_parser.add_argument("--force", action="store_true")
     return parser
@@ -56,13 +59,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return _run_command(args, sys.stdout)
+        return _run_command(args, sys.stdout, sys.stderr)
     except SkillSyncError as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
 
 
-def _run_command(args: argparse.Namespace, output: TextIO) -> int:
+def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO) -> int:
     command = args.command
     if command == "init":
         config = init_config(
@@ -108,21 +111,72 @@ def _run_command(args: argparse.Namespace, output: TextIO) -> int:
             output.write(f"registry path: {result.registry_path}\n")
             output.write(f"pushed: {str(result.pushed).lower()}\n")
     elif command == "install":
-        config = read_config()
-        result = install_skill(
-            args.skill_name,
-            config,
-            target=args.target,
-            force=args.force,
-        )
-        output.write(f"Installed skill: {result.name}\n")
-        output.write(f"target: {result.target}\n")
-        output.write(f"path: {result.path}\n")
-        output.write(f"commit: {result.commit}\n")
+        return _run_install(args, output, error_output)
     else:
         msg = f"Unhandled command: {command}"
         raise SkillSyncError(msg)
     return 0
+
+
+def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO) -> int:
+    skill_name = args.skill_name
+    install_all = bool(args.install_all)
+    if install_all:
+        if skill_name is not None:
+            msg = "Pass either a skill name or --all, not both."
+            raise SkillSyncError(msg)
+        config = read_config()
+        _install_all(
+            config,
+            target=args.target,
+            force=args.force,
+            output=output,
+            error_output=error_output,
+        )
+        return 0
+
+    if not isinstance(skill_name, str):
+        msg = "Pass a skill name or --all."
+        raise SkillSyncError(msg)
+
+    config = read_config()
+    result = install_skill(
+        skill_name,
+        config,
+        target=args.target,
+        force=args.force,
+    )
+    _write_install_result(output, result)
+    return 0
+
+
+def _install_all(
+    config: Config,
+    *,
+    target: str,
+    force: bool,
+    output: TextIO,
+    error_output: TextIO,
+) -> None:
+    skills = list_skills(config.checkout)
+    if not skills:
+        output.write("No skills found.\n")
+        return
+
+    for skill in skills:
+        try:
+            result = install_skill(skill.name, config, target=target, force=force)
+        except TargetSkillExistsError as exc:
+            error_output.write(f"[ERROR] {exc}\n")
+            continue
+        _write_install_result(output, result)
+
+
+def _write_install_result(output: TextIO, result: InstallResult) -> None:
+    output.write(f"Installed skill: {result.name}\n")
+    output.write(f"target: {result.target}\n")
+    output.write(f"path: {result.path}\n")
+    output.write(f"commit: {result.commit}\n")
 
 
 def _write_status(output: TextIO) -> None:

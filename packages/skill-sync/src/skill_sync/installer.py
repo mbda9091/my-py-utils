@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 
 from skill_sync.catalog import SYNC_METADATA_FILE, find_skill
 from skill_sync.config import Config, InstallationRecord, read_installations, write_installations
-from skill_sync.errors import SkillSyncError
+from skill_sync.errors import SkillSyncError, TargetSkillExistsError
 from skill_sync.git_repo import current_commit
 from skill_sync.validation import validate_skill_name
 
@@ -39,7 +39,7 @@ def install_skill(
     destination = skills_root / name
     if destination.exists() and not force:
         msg = f"Target skill already exists: {destination}. Pass --force to overwrite it."
-        raise SkillSyncError(msg)
+        raise TargetSkillExistsError(msg)
 
     skills_root.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="skill-sync-install-", dir=skills_root) as temporary:

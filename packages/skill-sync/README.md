@@ -18,11 +18,17 @@ skill-sync publish ~/.agents/skills/foo
 skill-sync publish ~/.agents/skills/foo --update --no-push
 skill-sync list
 skill-sync install foo --target codex --force
+skill-sync install --all --target codex
+skill-sync install --all --target codex --force
 ```
 
 The default state directory is `~/.skill-sync`. Set `SKILL_SYNC_HOME` to use a
 different directory for configuration, the registry checkout, and installation
 records.
+
+`install --all` installs every skill in the registry cache. If a local skill
+with the same name already exists, it logs an error and skips that skill. Pass
+`--force` to overwrite existing local skills.
 
 ## Git Identity
 
