@@ -3,19 +3,20 @@ from __future__ import annotations
 import io
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
+import pytest
 from mac_cache_cleaner.cli import (
     CleanCommand,
     CleanResult,
+    build_parser,
     clean_all,
     clean_one,
+    main,
     resolve_paths,
 )
 
-if TYPE_CHECKING:
-    import pytest
+EXIT_USAGE = 2
 
 
 def test_resolve_paths_expands_android_studio_versions(tmp_path: Path) -> None:
@@ -143,3 +144,19 @@ def test_clean_all_logs_each_command_and_keeps_going(
     assert "[RUN] ~/.gradle\n" in file_log
     assert "matched paths: none\n" in file_log
     assert "[DONE] ~/.konan" in file_log
+
+
+def test_build_parser_supports_help() -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(["--help"])
+
+    assert error.value.code == 0
+
+
+def test_main_rejects_unrecognized_arguments() -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["--unknown"])
+
+    assert error.value.code == EXIT_USAGE

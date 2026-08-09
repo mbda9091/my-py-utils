@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -240,10 +241,15 @@ def create_log_path(home: Path | None = None) -> Path:
     return log_home / LOG_DIR / f"{timestamp}.log"
 
 
+def build_parser() -> argparse.ArgumentParser:
+    return argparse.ArgumentParser(
+        prog="mac-cache-cleaner",
+        description="Clean common macOS build caches for Android, iOS, Harmony, and KMP.",
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    if argv:
-        sys.stderr.write("mac-cache-cleaner does not accept arguments.\n")
-        return 2
+    build_parser().parse_args(argv)
 
     log_path = create_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)

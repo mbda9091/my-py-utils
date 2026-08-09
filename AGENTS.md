@@ -9,7 +9,12 @@ This repository is a Python CLI utilities monorepo managed by `uv` workspaces.
 ```text
 packages/
   my-py-utils-common/   Shared helpers for CLI packages
+  my-py-utils-cli/      Aggregate installer for all workspace CLI commands
   hello-cli/            Example CLI package
+  video2audio/          CLI for extracting audio from video files with ffmpeg
+  mac-cache-cleaner/    CLI for cleaning macOS build caches
+  node-modules-cleaner/ CLI for recursively deleting node_modules directories
+  skill-sync/           Git-backed personal skill registry sync CLI
 tests/                  Workspace-level tests
 ```
 
@@ -51,7 +56,7 @@ packages/<cli-name>/
   README.md
   src/<import_name>/
     __init__.py
-    main.py
+    main.py or cli.py
 ```
 
 Every CLI package should define its command in `[project.scripts]`.
@@ -62,6 +67,12 @@ Example:
 [project.scripts]
 hello-util = "hello_cli.main:main"
 ```
+
+The aggregate installer package `packages/my-py-utils-cli` is intentionally
+different: it may contain almost no runtime code. It depends on the workspace CLI
+packages and re-exports their console scripts from its own `[project.scripts]`.
+When adding a new CLI package, also add it to `my-py-utils-cli` dependencies,
+`[tool.uv.sources]`, `[project.scripts]`, and README command list.
 
 If a package uses shared helpers, depend on the workspace package:
 
@@ -81,7 +92,17 @@ Keep CLI packages thin:
 
 - parse command-line arguments in the CLI package
 - put reusable logic in shared helpers or package-local modules
-- keep `main.py` focused on I/O and orchestration
+- keep `main.py` or `cli.py` focused on I/O and orchestration
+
+## skill-sync Rules
+
+`skill-sync` publishes commits to a personal Git registry. Its publish path must
+use a registry-specific Git identity from configuration, not the machine's
+global Git identity. Keep `publish` fail-closed when this identity is missing.
+
+Publishing local skills runs privacy and safety checks. Avoid hard-coded local
+absolute paths such as `/Users/<name>/...` in publishable skill content; use
+`~`, `<vault-path>`, or another placeholder instead.
 
 ## Code Quality
 
