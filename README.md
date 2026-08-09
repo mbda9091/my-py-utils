@@ -2,6 +2,8 @@
 
 Personal Python CLI utilities managed as a uv workspace.
 
+All commands in this README are intended to run from this repository root.
+
 ## Layout
 
 ```text
@@ -37,10 +39,40 @@ uv run --package skill-sync skill-sync --help
 uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email bozieg@qq.com
 ```
 
+## Initialize This Project
+
+Install or refresh the workspace environment:
+
+```bash
+uv sync --all-groups --all-packages
+```
+
+Run the standard checks:
+
+```bash
+uv run ruff check .
+uv run pyright
+uv run pytest
+```
+
+For package or build changes, also verify packaging:
+
+```bash
+uv build --all-packages
+```
+
 ## Install All CLI Commands
+
+From the repository root:
 
 ```bash
 uv tool install --editable packages/my-py-utils-cli
+```
+
+Refresh an existing installation after code changes:
+
+```bash
+uv tool install --editable packages/my-py-utils-cli --force
 ```
 
 This installs all workspace commands into your uv tool bin directory:
