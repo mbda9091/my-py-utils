@@ -34,6 +34,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "packages/*/src/*/main.py" = ["T201"]
 "tests/**/*.py" = ["S101"]
+"packages/workspacectl/src/workspacectl/cli.py" = ["T201"]
 
 [tool.pytest.ini_options]
 addopts = ["-q"]

@@ -1,0 +1,16 @@
+[project]
+name = "workspacectl"
+version = "0.1.0"
+description = "Workspace controller for requirement-scoped Git worktrees."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+workspacectl = "workspacectl.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"

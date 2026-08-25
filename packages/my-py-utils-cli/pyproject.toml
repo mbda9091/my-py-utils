@@ -10,6 +10,7 @@ dependencies = [
     "node-modules-cleaner",
     "skill-sync",
     "video2audio",
+    "workspacectl",
 ]
 
 [project.scripts]
@@ -18,6 +19,7 @@ mac-cache-cleaner = "mac_cache_cleaner:main"
 node-modules-cleaner = "node_modules_cleaner:main"
 skill-sync = "skill_sync.cli:main"
 video2audio = "video2audio:main"
+workspacectl = "workspacectl.cli:main"
 
 [tool.uv.sources]
 hello-cli = { workspace = true }
@@ -25,6 +27,7 @@ mac-cache-cleaner = { workspace = true }
 node-modules-cleaner = { workspace = true }
 skill-sync = { workspace = true }
 video2audio = { workspace = true }
+workspacectl = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]

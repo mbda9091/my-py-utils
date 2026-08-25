@@ -16,6 +16,7 @@ video2audio --help
 mac-cache-cleaner --help
 node-modules-cleaner --help
 skill-sync --help
+workspacectl --help
 ```
 
 After changing command code, reinstall with `--force` if uv does not refresh the

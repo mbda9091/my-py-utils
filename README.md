@@ -13,6 +13,7 @@ packages/
   video2audio/          CLI for extracting audio from video files with ffmpeg
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
+  workspacectl/         Controller for requirement-scoped Git worktrees
   my-py-utils-cli/      Aggregate installer for all workspace CLI commands
 tests/                  Workspace-level tests
 ```
@@ -36,6 +37,7 @@ uv run --package video2audio video2audio --help
 uv run --package mac-cache-cleaner mac-cache-cleaner --help
 uv run --package node-modules-cleaner node-modules-cleaner ~/Code --dry-run
 uv run --package skill-sync skill-sync --help
+uv run --package workspacectl workspacectl --help
 uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email bozieg@qq.com
 ```
 
@@ -83,6 +85,7 @@ video2audio
 mac-cache-cleaner
 node-modules-cleaner
 skill-sync
+workspacectl
 ```
 
 ## Add A New CLI
@@ -90,7 +93,8 @@ skill-sync
 1. Create `packages/<cli-name>/pyproject.toml`.
 2. Put code under `packages/<cli-name>/src/<import_name>/`.
 3. Add a command under `[project.scripts]`.
-4. If it uses shared helpers, depend on `my-py-utils-common` and add:
+4. Add the package to `packages/my-py-utils-cli` dependencies, workspace sources, and scripts.
+5. If it uses shared helpers, depend on `my-py-utils-common` and add:
 
 ```toml
 [tool.uv.sources]
