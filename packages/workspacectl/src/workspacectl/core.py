@@ -12,6 +12,18 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
+from .hooks import (
+    HookError,
+    HookOptions,
+    HookResult,
+)
+from .hooks import (
+    run_post_create_hook as dispatch_post_create_hook,
+)
+from .hooks import (
+    run_pre_cleanup_hook as dispatch_pre_cleanup_hook,
+)
+
 try:
     import yaml
 except ModuleNotFoundError as exc:  # pragma: no cover - fallback guard
@@ -21,8 +33,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover - fallback guard
 
 TASK_PROMPT_VERSION = "workspace-agent/v1"
 AGENT_MODES = ("usage", "development")
+DEFAULT_UPSTREAM = "HEAD"
 REPO_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SLUG_RULE_MESSAGE = (
+    "slug must contain only lowercase ASCII letters, digits, and single hyphens; "
+    "it must start and end with a letter or digit. Please retry."
+)
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TASK_ROOT_PATTERN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)$")
 
@@ -44,11 +61,9 @@ def sanitize_segment(value: str) -> str:
     return value or "workspace"
 
 
-def slugify_title(value: str) -> str:
-    value = value.strip().lower()
-    value = re.sub(r"[^a-z0-9]+", "-", value)
-    value = re.sub(r"-+", "-", value).strip("-")
-    return value or "requirement"
+def validate_requirement_slug(slug: str) -> None:
+    if not SLUG_PATTERN.fullmatch(slug):
+        raise_workspace_error(f"invalid requirement slug: {slug!r}; {SLUG_RULE_MESSAGE}")
 
 
 def current_date_string() -> str:
@@ -225,10 +240,6 @@ def task_root_slug_from_name(name: str) -> str:
     return match.group("slug")
 
 
-def requirement_slug_from_title(title: str) -> str:
-    return slugify_title(title)
-
-
 def workspace_root_from_cwd() -> Path:
     return Path.cwd().resolve()
 
@@ -251,6 +262,54 @@ def default_docs_root(root: Path) -> Path:
 
 def default_control_root(root: Path) -> Path:
     return root / ".workspace"
+
+
+def ensure_workspace_gitignore(root: Path) -> bool:
+    path = root / ".gitignore"
+    existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    required = ("projects/", "worktrees/")
+    changed = False
+    for pattern in required:
+        if pattern not in existing:
+            existing.append(pattern)
+            changed = True
+    if changed or not path.exists():
+        path.write_text("\n".join(existing).rstrip() + "\n", encoding="utf-8")
+    return changed or not path.exists()
+
+
+def ensure_workspace_git(root: Path) -> bool:
+    git_path = root / ".git"
+    if git_path.exists():
+        repository_root = Path(git_run(["rev-parse", "--show-toplevel"], root)).resolve()
+        if repository_root != root:
+            raise_workspace_error(
+                f"workspace root must be an independent Git repository: {repository_root}"
+            )
+        return False
+    git_run(["init"], root)
+    return True
+
+
+def run_post_create_hook(
+    source_repo: Path,
+    worktree: Path,
+    options: HookOptions,
+) -> HookResult:
+    try:
+        return dispatch_post_create_hook(source_repo, worktree, options)
+    except HookError as exc:
+        raise_workspace_error(str(exc), cause=exc)
+
+
+def run_pre_cleanup_hook(
+    worktree: Path,
+    options: HookOptions,
+) -> HookResult:
+    try:
+        return dispatch_pre_cleanup_hook(worktree, options)
+    except HookError as exc:
+        raise_workspace_error(str(exc), cause=exc)
 
 
 @dataclass
@@ -311,28 +370,36 @@ class WorkspaceController:
 
     def ensure_init(self, *, create_config: bool = True) -> dict[str, Any]:
         created: list[str] = []
+        git_initialized = ensure_workspace_git(self.root)
+        if git_initialized:
+            created.append(".git")
         for path in (self.projects_root, self.worktrees_root, self.docs_root, self.control_root):
             if not path.exists():
                 ensure_dir(path)
                 created.append(str(path.relative_to(self.root)))
+        gitignore_path = self.root / ".gitignore"
+        gitignore_existed = gitignore_path.exists()
+        gitignore_changed = ensure_workspace_gitignore(self.root)
+        if gitignore_changed:
+            created.append(".gitignore" if not gitignore_existed else "updated .gitignore")
         if create_config and not self.config_path.exists():
             save_json(self.config_path, {"repositories": {}})
             created.append(self.config_path.name)
         if self.ensure_root_agents("usage", overwrite=False):
             created.append("AGENTS.md")
-        config: dict[str, Any] = (
-            load_json(self.config_path) if self.config_path.exists() else {"repositories": {}}
-        )
-        self.validate_config_bindings(config)
         return {
             "workspace_root": str(self.root),
             "created": created,
             "config_path": str(self.config_path),
+            "git_initialized": git_initialized,
+            "gitignore_path": str(self.root / ".gitignore"),
         }
 
     def load_config(self) -> dict[str, Any]:
         config = load_json(self.config_path)
-        self.validate_config_bindings(config)
+        repositories_value: Any = config.get("repositories", {})
+        if not isinstance(repositories_value, dict):
+            raise_workspace_error("workspace.json repositories must be an object")
         return config
 
     def save_config(self, config: dict[str, Any]) -> None:
@@ -354,7 +421,9 @@ class WorkspaceController:
         entry_path = self.projects_root / repo_id
         if repo_config is None:
             config = self.load_config()
-            repo_config = config.get("repositories", {}).get(repo_id)
+            repositories_value = config.get("repositories", {})
+            repositories = cast("dict[str, Any]", repositories_value)
+            repo_config = repositories.get(repo_id)
         if repo_config is None:
             raise_workspace_error(f"repository not found in workspace.json: {repo_id}")
         repo_config_value: Any = repo_config
@@ -405,8 +474,7 @@ class WorkspaceController:
             date.fromisoformat(task_date)
         except ValueError as exc:
             raise_workspace_error(f"invalid task date: {task_date}", cause=exc)
-        if not SLUG_PATTERN.fullmatch(slug):
-            raise_workspace_error(f"invalid requirement slug: {slug}")
+        validate_requirement_slug(slug)
         return self.worktrees_root / f"{task_date}-{slug}"
 
     def task_manifest_path(self, task_root: Path) -> Path:
@@ -457,9 +525,17 @@ class WorkspaceController:
         return collisions
 
     def current_source_ref(self, repo_root: Path, override: str | None = None) -> str:
-        if override:
-            return override
-        return git_current_ref(repo_root)
+        upstream = override or DEFAULT_UPSTREAM
+        if upstream.startswith("origin/"):
+            upstream = upstream.removeprefix("origin/")
+        try:
+            git_run(["fetch", "origin", upstream], repo_root, capture=True)
+        except WorkspaceError as exc:
+            raise_workspace_error(
+                f"unable to fetch upstream {upstream!r} from origin for {repo_root}: {exc}",
+                cause=exc,
+            )
+        return "FETCH_HEAD"
 
     def existing_worktree(self, repo_root: Path, target_path: Path) -> dict[str, str] | None:
         return git_worktree_entry(repo_root, target_path)
@@ -490,7 +566,7 @@ class WorkspaceController:
             f"- source repo: `{repo_root}`",
             f"- worktree path: `{worktree_path}`",
             f"- branch: `{branch}`",
-            f"- source PRD: `{requirement.get('source_prd_url', '')}`",
+            f"- source PRD: `{requirement.get('source_prd_url') or ''}`",
             f"- scope: {scope}",
             f"- prompt version: `{manifest.get('prompt_version', TASK_PROMPT_VERSION)}`",
             "",
@@ -539,6 +615,24 @@ class WorkspaceController:
         if changed or not exclude_path.exists():
             exclude_path.write_text("\n".join(existing).rstrip() + "\n", encoding="utf-8")
 
+    def ensure_agents_local_link(self, repo_root: Path, worktree_path: Path) -> None:
+        source = repo_root / "AGENTS.local.md"
+        if not source.is_file():
+            return
+        target = worktree_path / "AGENTS.local.md"
+        source_resolved = source.resolve()
+        if target.is_symlink():
+            if target.resolve(strict=False) == source_resolved:
+                return
+            target.unlink()
+        elif target.exists():
+            if not target.is_file() or target.read_bytes() != source.read_bytes():
+                raise_workspace_error(
+                    f"worktree already contains a different AGENTS.local.md: {target}"
+                )
+            target.unlink()
+        target.symlink_to(source_resolved)
+
     # Worktree creation is an integration boundary, so its parameters stay explicit.
     def ensure_worktree(  # noqa: PLR0913
         self,
@@ -548,7 +642,7 @@ class WorkspaceController:
         project_id: str,
         slug: str,
         branch: str,
-        base_ref: str | None = None,
+        source_ref: str | None = None,
     ) -> tuple[WorktreeBinding, bool]:
         target_path = task_root / f"{project_id}-{slug}"
         existing = self.existing_worktree(binding.repo_root, target_path)
@@ -560,19 +654,21 @@ class WorkspaceController:
                     f"{existing_branch} != {branch}"
                 )
             self.ensure_worktree_excludes(target_path)
+            self.ensure_agents_local_link(binding.repo_root, target_path)
             return WorktreeBinding(project_id=project_id, path=target_path, branch=branch), True
         ensure_dir(task_root)
         if git_local_branch_exists(binding.repo_root, branch):
             git_run(["worktree", "add", str(target_path), branch], binding.repo_root)
         else:
-            if not base_ref:
+            if not source_ref:
                 raise_workspace_error(
-                    f"missing base ref for new worktree {target_path}; provide one explicitly"
+                    f"missing upstream ref for new worktree {target_path}; provide one explicitly"
                 )
             git_run(
-                ["worktree", "add", "-b", branch, str(target_path), base_ref], binding.repo_root
+                ["worktree", "add", "-b", branch, str(target_path), source_ref], binding.repo_root
             )
         self.ensure_worktree_excludes(target_path)
+        self.ensure_agents_local_link(binding.repo_root, target_path)
         return WorktreeBinding(project_id=project_id, path=target_path, branch=branch), False
 
     def remove_worktree(
@@ -607,7 +703,7 @@ class WorkspaceController:
         *,
         title: str,
         slug: str,
-        source_prd_url: str,
+        source_prd_url: str | None,
         scope: list[str],
         worktrees: list[dict[str, Any]],
         prompt_version: str = TASK_PROMPT_VERSION,
@@ -655,23 +751,23 @@ class WorkspaceController:
         self,
         *,
         title: str,
-        source_prd_url: str,
+        source_prd_url: str | None,
         project_ids: list[str],
-        slug: str | None = None,
+        slug: str,
         task_date: str | None = None,
         git_username: str | None = None,
-        base_ref: str | None = None,
+        upstream: str | None = None,
         reuse_existing: bool = False,
+        hook_options: HookOptions | None = None,
     ) -> dict[str, Any]:
+        hook_options = hook_options or HookOptions()
         if not title.strip():
             raise_workspace_error("requirement title is required")
-        if not source_prd_url.strip():
-            raise_workspace_error("source PRD URL is required")
+        if source_prd_url is not None and not source_prd_url.strip():
+            raise_workspace_error("source PRD URL cannot be empty when provided")
         if not project_ids:
             raise_workspace_error("at least one project id is required")
-        slug = slug or requirement_slug_from_title(title)
-        if not SLUG_PATTERN.fullmatch(slug):
-            raise_workspace_error(f"invalid requirement slug: {slug}")
+        validate_requirement_slug(slug)
         collisions = self.slug_collisions(slug)
         if collisions:
             active_root = self.find_task_root_by_slug(slug)
@@ -713,15 +809,14 @@ class WorkspaceController:
         bindings: list[RepositoryBinding] = []
         for project_id in project_ids:
             binding = self.bind_repository(project_id)
-            if not self.source_repo_clean(binding.repo_root):
-                raise_workspace_error(f"source repository is dirty: {binding.entry_path}")
             bindings.append(binding)
         worktrees: list[dict[str, Any]] = []
+        hook_events: list[dict[str, Any]] = []
         created: list[tuple[RepositoryBinding, Path]] = []
         branches_created: set[tuple[Path, str]] = set()
         try:
             for binding in bindings:
-                source_ref = self.current_source_ref(binding.repo_root, base_ref)
+                source_ref = self.current_source_ref(binding.repo_root, upstream)
                 branch_preexisting = git_local_branch_exists(binding.repo_root, branch)
                 worktree_binding, reused = self.ensure_worktree(
                     binding=binding,
@@ -729,12 +824,24 @@ class WorkspaceController:
                     project_id=binding.repo_id,
                     slug=slug,
                     branch=branch,
-                    base_ref=source_ref,
+                    source_ref=source_ref,
                 )
                 if not reused:
                     created.append((binding, worktree_binding.path))
                     if not branch_preexisting:
                         branches_created.add((binding.repo_root, branch))
+                    hook_result = run_post_create_hook(
+                        binding.repo_root,
+                        worktree_binding.path,
+                        hook_options,
+                    )
+                    hook_events.append(
+                        {
+                            "project_id": binding.repo_id,
+                            "project": hook_result.project,
+                            "messages": hook_result.messages,
+                        }
+                    )
                 worktrees.append(
                     {
                         "project_id": worktree_binding.project_id,
@@ -778,6 +885,7 @@ class WorkspaceController:
             "scope": project_ids,
             "branch": branch,
             "worktrees": worktrees,
+            "hooks": hook_events,
             "prompt_version": TASK_PROMPT_VERSION,
         }
 
@@ -795,15 +903,17 @@ class WorkspaceController:
                 git_run(["branch", "-D", branch], repo_root, capture=True)
 
     # Scope changes are transactional across multiple repositories and need explicit rollback.
-    def extend_requirement(  # noqa: C901, PLR0912, PLR0915
+    def extend_requirement(  # noqa: C901, PLR0912, PLR0913, PLR0915
         self,
         *,
         task_root: Path,
         add_ids: list[str],
         remove_ids: list[str],
         git_username: str | None = None,
-        base_ref: str | None = None,
+        upstream: str | None = None,
+        hook_options: HookOptions | None = None,
     ) -> dict[str, Any]:
+        hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
         requirement = manifest.get("requirement", {})
         slug = requirement.get("slug")
@@ -812,10 +922,13 @@ class WorkspaceController:
         scope = list(manifest.get("scope", []))
         if not isinstance(slug, str) or not slug:
             raise_workspace_error("task manifest is missing requirement slug")
+        validate_requirement_slug(slug)
         if not isinstance(title, str) or not title:
             raise_workspace_error("task manifest is missing requirement title")
-        if not isinstance(source_prd_url, str) or not source_prd_url:
-            raise_workspace_error("task manifest is missing source PRD URL")
+        if source_prd_url is not None and (
+            not isinstance(source_prd_url, str) or not source_prd_url
+        ):
+            raise_workspace_error("task manifest contains an invalid source PRD URL")
         if not add_ids and not remove_ids:
             raise_workspace_error("extend-requirement needs at least one add or remove project id")
         current_ids = set(scope)
@@ -833,7 +946,7 @@ class WorkspaceController:
             for item in cast("list[dict[str, Any]]", manifest.get("worktrees", []))
             if isinstance(item.get("project_id"), str)
         }
-        bindings = {repo.repo_id: repo for repo in self.repositories()}
+        bindings: dict[str, RepositoryBinding] = {}
         removed_operations: list[tuple[RepositoryBinding, Path, str]] = []
         for project_id in remove_set:
             entry = current_worktrees.get(project_id)
@@ -859,13 +972,12 @@ class WorkspaceController:
         added_operations: list[tuple[str, RepositoryBinding, str, bool]] = []
         for project_id in add_set:
             binding = bindings.get(project_id) or self.bind_repository(project_id)
-            if not self.source_repo_clean(binding.repo_root):
-                raise_workspace_error(f"source repository is dirty: {binding.entry_path}")
-            source_ref = self.current_source_ref(binding.repo_root, base_ref)
+            source_ref = self.current_source_ref(binding.repo_root, upstream)
             branch_preexisting = git_local_branch_exists(binding.repo_root, branch)
             added_operations.append((project_id, binding, source_ref, branch_preexisting))
         removed_snapshots: list[dict[str, Any]] = []
         added_snapshots: list[tuple[RepositoryBinding, Path]] = []
+        hook_events: list[dict[str, Any]] = []
         branches_created: set[tuple[Path, str]] = set()
         # Remove first so branch naming remains stable, then add new scope items.
         try:
@@ -885,19 +997,31 @@ class WorkspaceController:
                     project_id=project_id,
                     slug=slug,
                     branch=branch,
-                    base_ref=source_ref,
+                    source_ref=source_ref,
                 )
                 if not reused:
                     added_snapshots.append((binding, worktree_binding.path))
                     if not branch_preexisting:
                         branches_created.add((binding.repo_root, branch))
+                    hook_result = run_post_create_hook(
+                        binding.repo_root,
+                        worktree_binding.path,
+                        hook_options,
+                    )
+                    hook_events.append(
+                        {
+                            "project_id": project_id,
+                            "project": hook_result.project,
+                            "messages": hook_result.messages,
+                        }
+                    )
                 current_worktrees[project_id] = {
                     "project_id": project_id,
                     "path": self.relative_manifest_path(worktree_binding.path),
                     "branch": branch,
                 }
         except Exception:
-            self._restore_removed_worktrees(removed_snapshots)
+            self._restore_removed_worktrees(removed_snapshots, hook_options)
             self._rollback_created_worktrees(added_snapshots, branches_created)
             raise
         scope = [project_id for project_id in scope if project_id not in remove_set] + add_set
@@ -912,6 +1036,7 @@ class WorkspaceController:
             if not worktree_path.is_absolute():
                 worktree_path = (self.root / worktree_path).resolve()
             self.ensure_worktree_excludes(worktree_path)
+            self.ensure_agents_local_link(binding.repo_root, worktree_path)
             self.write_agents(
                 task_root=task_root,
                 manifest=manifest,
@@ -929,24 +1054,31 @@ class WorkspaceController:
             "scope": scope,
             "branch": branch,
             "worktrees": worktrees,
+            "hooks": hook_events,
         }
 
-    def _restore_removed_worktrees(self, removed: list[dict[str, Any]]) -> None:
+    def _restore_removed_worktrees(
+        self,
+        removed: list[dict[str, Any]],
+        hook_options: HookOptions,
+    ) -> None:
         for snapshot in removed:
             binding = snapshot["binding"]
             path = snapshot["path"]
             branch = snapshot["branch"]
             if path.exists():
                 continue
-            base_ref = git_current_ref(binding.repo_root)
+            source_ref = git_current_ref(binding.repo_root)
             with suppress(Exception):
                 if git_local_branch_exists(binding.repo_root, branch):
                     git_run(["worktree", "add", str(path), branch], binding.repo_root)
                 else:
                     git_run(
-                        ["worktree", "add", "-b", branch, str(path), base_ref], binding.repo_root
+                        ["worktree", "add", "-b", branch, str(path), source_ref], binding.repo_root
                     )
                 self.ensure_worktree_excludes(path)
+                self.ensure_agents_local_link(binding.repo_root, path)
+                run_post_create_hook(binding.repo_root, path, hook_options)
 
     def archive_requirement(
         self, *, task_root: Path, discard_missing_docs: bool = False
@@ -1003,7 +1135,14 @@ class WorkspaceController:
                 if target.exists() and not source.exists():
                     shutil.move(str(target), str(source))
 
-    def cleanup_requirement(self, *, task_root: Path, force: bool = False) -> dict[str, Any]:
+    def cleanup_requirement(
+        self,
+        *,
+        task_root: Path,
+        force: bool = False,
+        hook_options: HookOptions | None = None,
+    ) -> dict[str, Any]:
+        hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
         worktrees = self.collect_manifest_worktrees(manifest)
         archive_root = self.docs_root / task_root.name
@@ -1014,6 +1153,7 @@ class WorkspaceController:
             )
             raise_workspace_error(message)
         removed: list[str] = []
+        hook_events: list[dict[str, Any]] = []
         for entry in worktrees:
             project_id = entry.get("project_id")
             relative_path = entry.get("path")
@@ -1026,6 +1166,14 @@ class WorkspaceController:
             if not force and git_status_porcelain(worktree_path):
                 message = f"worktree is dirty; rerun with --force to remove it: {worktree_path}"
                 raise_workspace_error(message)
+            hook_result = run_pre_cleanup_hook(worktree_path, hook_options)
+            hook_events.append(
+                {
+                    "project_id": project_id,
+                    "project": hook_result.project,
+                    "messages": hook_result.messages,
+                }
+            )
             self.remove_worktree(binding, worktree_path, force=force)
             removed.append(str(worktree_path))
             self.prune_worktrees(binding)
@@ -1035,6 +1183,7 @@ class WorkspaceController:
             "workspace_root": str(self.root),
             "task_root": str(task_root),
             "removed": removed,
+            "hooks": hook_events,
         }
 
     def status_report(self) -> dict[str, Any]:

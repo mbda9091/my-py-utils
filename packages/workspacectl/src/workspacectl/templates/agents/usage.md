@@ -9,17 +9,19 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
    ```bash
    workspacectl init
    ```
+   This creates the workspace Git repository and ignores `projects/` and
+   `worktrees/`; workspace control files and skills remain trackable.
 2. Update `workspace.json` with the projects you want to use.
 3. Make sure each `projects/<id>` points to a real source checkout or symlink.
 4. Create a requirement:
    ```bash
    workspacectl create-requirement \
      --title "..." \
-     --source-prd-url "..." \
      --project <id> \
      --project <id> \
      --slug <slug>
    ```
+   `--source-prd-url "..."` is optional.
 5. Work inside the generated `worktrees/<date>-<slug>/<project-id>-<slug>/` directory.
 6. Archive finished docs:
    ```bash
@@ -37,6 +39,8 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
 - `update` refreshes the workspace view.
 - `cleanup` comes after `archive-requirement`.
 - The branch name is managed for you.
+- Worktree hooks auto-detect Android, iOS, and default projects; use
+  `--project-type` when detection needs an override.
 - The worktree agent should stay inside its own worktree.
 
 ## If you need a single command picture

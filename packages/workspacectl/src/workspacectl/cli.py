@@ -6,6 +6,7 @@ import sys
 from typing import Any
 
 from .core import WorkspaceController, WorkspaceError
+from .hooks import DYNAMIC_VALUES, PROJECT_TYPES, HookOptions
 
 
 def add_common_output_args(parser: argparse.ArgumentParser) -> None:
@@ -17,6 +18,43 @@ def add_task_root_arg(parser: argparse.ArgumentParser) -> None:
         "--task-root",
         required=True,
         help="Task root path, relative to the workspace root or absolute.",
+    )
+
+
+def add_hook_args(parser: argparse.ArgumentParser, *, cleanup: bool = False) -> None:
+    parser.add_argument(
+        "--project-type",
+        choices=PROJECT_TYPES,
+        default="auto",
+        help="Project hook type; auto detects Android, iOS, or default.",
+    )
+    parser.add_argument("--kkr-target", help="Android remote.target override.")
+    parser.add_argument(
+        "--dynamic",
+        choices=DYNAMIC_VALUES,
+        default="false",
+        help="Android dynamic_branch_workspace value.",
+    )
+    if cleanup:
+        parser.add_argument(
+            "--clean-project-garbage",
+            action="store_true",
+            help="Remove supported external project-specific paths during cleanup.",
+        )
+        parser.add_argument(
+            "--allow-external-project-path",
+            action="store_true",
+            help="Allow Android external cleanup paths outside the default safe roots.",
+        )
+
+
+def hook_options(args: argparse.Namespace) -> HookOptions:
+    return HookOptions(
+        project_type=args.project_type,
+        kkr_target=args.kkr_target,
+        dynamic=args.dynamic,
+        clean_project_garbage=getattr(args, "clean_project_garbage", False),
+        allow_external_project_path=getattr(args, "allow_external_project_path", False),
     )
 
 
@@ -36,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         "create-requirement", help="Create a requirement and its worktrees."
     )
     create_parser.add_argument("--title", required=True, help="Requirement title from the PRD.")
-    create_parser.add_argument("--source-prd-url", required=True, help="Source PRD URL.")
+    create_parser.add_argument("--source-prd-url", help="Optional source PRD URL.")
     create_parser.add_argument(
         "--project",
         action="append",
@@ -44,15 +82,23 @@ def build_parser() -> argparse.ArgumentParser:
         dest="projects",
         help="Project id to include in the requirement scope. Repeatable.",
     )
-    create_parser.add_argument("--slug", help="Explicit requirement slug.")
+    create_parser.add_argument(
+        "--slug",
+        required=True,
+        help="Requirement slug: lowercase ASCII letters, digits, and hyphens.",
+    )
     create_parser.add_argument("--task-date", help="Override the task-root date prefix.")
     create_parser.add_argument("--git-username", help="Override the branch username segment.")
-    create_parser.add_argument("--base-ref", help="Override the base ref used for new worktrees.")
+    create_parser.add_argument(
+        "--upstream",
+        help="Upstream to fetch from origin; defaults to HEAD.",
+    )
     create_parser.add_argument(
         "--reuse-existing",
         action="store_true",
         help=("Reuse an active task root with the same slug, title, PRD URL, and scope."),
     )
+    add_hook_args(create_parser)
     add_common_output_args(create_parser)
 
     extend_parser = subparsers.add_parser("extend-requirement", help="Adjust a requirement scope.")
@@ -65,8 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extend_parser.add_argument("--git-username", help="Override the branch username segment.")
     extend_parser.add_argument(
-        "--base-ref", help="Override the base ref used for newly added worktrees."
+        "--upstream",
+        help="Upstream to fetch from origin; defaults to HEAD.",
     )
+    add_hook_args(extend_parser)
     add_common_output_args(extend_parser)
 
     archive_parser = subparsers.add_parser("archive-requirement", help="Archive worktree docs.")
@@ -83,6 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_task_root_arg(cleanup_parser)
     cleanup_parser.add_argument("--force", action="store_true", help="Remove dirty worktrees.")
+    add_hook_args(cleanup_parser, cleanup=True)
     add_common_output_args(cleanup_parser)
 
     status_parser = subparsers.add_parser("status", help="Show workspace state.")
@@ -125,16 +174,18 @@ def emit(  # noqa: C901, PLR0912, PLR0915
     elif command == "create-requirement":
         print(f"task root: {result['task_root']}")
         print(f"branch: {result['branch']}")
-        print(f"source PRD URL: {result['requirement']['source_prd_url']}")
+        print(f"source PRD URL: {result['requirement']['source_prd_url'] or ''}")
         print("worktrees:")
         for item in result["worktrees"]:
             print(f"  - {item['project_id']}: {item['path']}")
+        emit_hook_events(result)
     elif command == "extend-requirement":
         print(f"task root: {result['task_root']}")
         print(f"branch: {result['branch']}")
         print("worktrees:")
         for item in result["worktrees"]:
             print(f"  - {item['project_id']}: {item['path']}")
+        emit_hook_events(result)
     elif command == "archive-requirement":
         print(f"task root: {result['task_root']}")
         print(f"archive root: {result['archive_root']}")
@@ -152,6 +203,7 @@ def emit(  # noqa: C901, PLR0912, PLR0915
             print("removed:")
             for item in result["removed"]:
                 print(f"  - {item}")
+        emit_hook_events(result)
     elif command == "status":
         print(f"workspace root: {result['workspace_root']}")
         print("repositories:")
@@ -184,6 +236,17 @@ def emit(  # noqa: C901, PLR0912, PLR0915
     return 0 if result.get("ok", True) else 1
 
 
+def emit_hook_events(result: dict[str, Any]) -> None:
+    events = result.get("hooks", [])
+    if not events:
+        return
+    print("hooks:")
+    for event in events:
+        print(f"  - {event['project_id']} ({event['project']}):")
+        for message in event.get("messages", []):
+            print(f"      {message}")
+
+
 # Dispatch stays in one place to preserve identical JSON and text command behavior.
 def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
     args: argparse.Namespace,
@@ -209,6 +272,7 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
                     binding = controller.bind_repository(project_id)
                     worktree_path = (controller.root / relative_path).resolve()
                     controller.ensure_worktree_excludes(worktree_path)
+                    controller.ensure_agents_local_link(binding.repo_root, worktree_path)
                     controller.write_agents(
                         task_root=task_root,
                         manifest=manifest,
@@ -229,8 +293,9 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
             slug=args.slug,
             task_date=args.task_date,
             git_username=args.git_username,
-            base_ref=args.base_ref,
+            upstream=args.upstream,
             reuse_existing=args.reuse_existing,
+            hook_options=hook_options(args),
         )
         result["command"] = "create-requirement"
         result["ok"] = True
@@ -242,7 +307,8 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
             add_ids=args.add_ids,
             remove_ids=args.remove_ids,
             git_username=args.git_username,
-            base_ref=args.base_ref,
+            upstream=args.upstream,
+            hook_options=hook_options(args),
         )
         result["command"] = "extend-requirement"
         result["ok"] = True
@@ -258,7 +324,11 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
         return result
     if args.command == "cleanup":
         task_root = controller.resolve_task_root(args.task_root)
-        result = controller.cleanup_requirement(task_root=task_root, force=args.force)
+        result = controller.cleanup_requirement(
+            task_root=task_root,
+            force=args.force,
+            hook_options=hook_options(args),
+        )
         result["command"] = "cleanup"
         result["ok"] = True
         return result

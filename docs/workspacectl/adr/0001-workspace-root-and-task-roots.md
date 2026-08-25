@@ -21,4 +21,4 @@ status: accepted
 - 具体 worktree 子目录命名为 `worktrees/<date>-<slug>/<project-id>-<slug>/`。
 - 归档后执行 `cleanup` 时，不自动删除 branch。
 - branch 只按 requirement slug 命名，不带 project id。
-- `create-requirement` 用 PRD 标题继承 requirement title，再归一化出 slug。
+- `create-requirement` 使用显式传入的 requirement title 和 slug；slug 必须符合小写 ASCII 字母、数字和单个连字符的格式。

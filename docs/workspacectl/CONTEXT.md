@@ -29,7 +29,7 @@ workspace 下的项目汇总目录。里面放各个已登记 project 的本地 
 一次需求改动的维度；一个 requirement 可以覆盖一个或多个 project。
 
 **requirement title**:
-由 PRD 标题继承过来的需求标题，用来归一化出 slug。
+需求的可读标题，记录在 requirement manifest 中；它不自动生成 slug。
 
 **project scope**:
 某个 requirement 当前覆盖的 project 集合。
@@ -41,7 +41,8 @@ workspace 下的项目汇总目录。里面放各个已登记 project 的本地 
 按 `worktrees/<date>-<slug>/` 命名的任务父目录，承载同一 requirement 下的多个 worktree。
 
 **task slug**:
-从需求标题或任务名归一化得到的任务标识，用于 task root 和 branch 名称。
+创建 requirement 时显式提供的任务标识，用于 task root 和 branch 名称。必须符合
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`：只能使用小写 ASCII 字母、数字和单个连字符，且必须以字母或数字开头和结尾。
 
 **worktree**:
 为一次具体改动创建的可写 checkout。
@@ -65,7 +66,7 @@ workspace root 的工作指引文件。当前这个 workspace repo 里它保持 
 将当前 workspace root 的 `AGENTS.md` 显式替换为 `templates/agents/usage.md` 或 `templates/agents/development.md` 的命令。
 
 **.workspace/task.yaml**:
-活跃 task root 内的最小机器可读记录，只保留 project、project scope、worktree、分支、source PRD URL 和 prompt 版本这类恢复所需信息。
+活跃 task root 内的最小机器可读记录，只保留 project、project scope、worktree、分支、可选的 source PRD URL 和 prompt 版本这类恢复所需信息。
 
 **durable deliverables**:
 worktree 里最终要迁移到 workspace 的文档树；当前主要指 requirement doc 和 implementation doc。

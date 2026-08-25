@@ -9,6 +9,7 @@ status: accepted
 
 - 启动提示保持短，只承载事实和约束，不承载教程。
 - per-worktree 指令文件统一落在 `.workspace/AGENTS.md`。
+- 项目主 checkout 的 `AGENTS.local.md`（如果存在）以软链形式挂载到每个 worktree 根目录，供项目本地规则复用。
 - 新 workspace root 的 `AGENTS.md` 由 `init` 默认注入 `usage` 模板。
 - 当前 workspace root 的 `AGENTS.md` 可以通过 `set-agent-mode` 显式切换。
 - launcher 只认当前目录，不向上找 workspace root。

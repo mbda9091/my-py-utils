@@ -39,6 +39,7 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 - 只做初始化。
 - 只看当前目录，不向上找。
 - 幂等补齐 `projects/`、`worktrees/`、`doc/`、`.workspace/` 这些骨架。
+- 同步初始化独立 Git 仓库，并在 `.gitignore` 中忽略 `projects/` 与 `worktrees/`；workspace 控制面和后续 skill 文件保持可跟踪。
 - 如果当前目录还没有 `AGENTS.md`，写入 usage 模板。
 - 不做 reconcile，不改需求语义。
 
@@ -50,12 +51,16 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 
 ### 3. `create-requirement`
 
-- 输入：PRD URL、显式初始 scope。
-- 生成 requirement title 和 slug。
+- 输入：requirement title、必填 slug、可选 PRD URL、显式初始 scope。
+- slug 只能使用小写 ASCII 字母、数字和单个连字符，且必须以字母或数字开头和结尾；不合规时直接拒绝。
 - 创建 task root。
+- 只校验显式 scope 中的 project；`workspace.json` 中未被选中的登记条目不会阻止本次创建。
 - 为 scope 内每个 project 准备 worktree。
+- 如果项目主 checkout 存在 `AGENTS.local.md`，在 worktree 根目录创建指向它的软链；没有该文件时不创建悬空软链。
+- source repo 可以有未提交改动；默认只执行 `git fetch origin HEAD`，再从本次 fetch 得到的 `FETCH_HEAD` 创建 worktree。传入 `--upstream` 时，将其作为 `<upstream>` 执行 `git fetch origin <upstream>`。
+- 按项目类型自动识别并执行 worktree post-create hook；可用 `--project-type` 覆盖识别结果。
 - 写入活跃 task root 的 `.workspace/task.yaml`。
-- 返回 task root、worktree、branch、PRD URL 的摘要。
+- 返回 task root、worktree、branch 和 PRD URL（如有）的摘要。
 
 ### 4. worktree 内执行
 
@@ -84,6 +89,7 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 
 - 在 archive 之后执行。
 - 如果 `doc/<task-root-name>/` 不存在，直接拒绝。
+- 删除前执行对应的 pre-clean hook；Android 默认执行 `kkr clear`，default 项目在可用时清理 Watchman watch。
 - 删除 worktree、task root 和 `.workspace/task.yaml`。
 - 不负责删 branch。
 
@@ -98,7 +104,7 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 实现文档里必须保留一个简短附录，用来回验过程。建议至少包含：
 
 - `task_root`
-- `source_prd_url`
+- `source_prd_url`（可选；未提供时为空）
 - `requirement_title`
 - `branch`
 - `scope_before`
