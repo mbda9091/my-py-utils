@@ -22,14 +22,10 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
      --slug <slug>
    ```
    `--source-prd-url "..."` is optional.
-5. Work inside the generated `worktrees/<date>-<slug>/<project-id>-<slug>/` directory.
-6. Archive finished docs:
+5. Work inside the generated `worktrees/<date>-<slug>/<project-id>-<slug>/` directory. Keep durable requirement artifacts in the task root outside child worktrees.
+6. Archive the finished requirement:
    ```bash
    workspacectl archive-requirement --task-root worktrees/<date>-<slug>
-   ```
-7. Clean up the disposable worktree:
-   ```bash
-   workspacectl cleanup --task-root worktrees/<date>-<slug>
    ```
 
 ## What to remember
@@ -37,7 +33,7 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
 - `status` shows the current state.
 - `doctor` checks for problems.
 - `update` refreshes the workspace view.
-- `cleanup` comes after `archive-requirement`.
+- `archive-requirement` removes child worktrees and moves the complete task root into `doc/`.
 - The branch name is managed for you.
 - Worktree hooks auto-detect Android, iOS, and default projects; use
   `--project-type` when detection needs an override.
@@ -48,5 +44,4 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
 - Start: `init`
 - Prepare: `create-requirement`
 - Work: inside the generated worktree
-- Finish docs: `archive-requirement`
-- Remove disposable state: `cleanup`
+- Finish and archive: `archive-requirement`

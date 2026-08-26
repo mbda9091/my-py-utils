@@ -573,7 +573,7 @@ class WorkspaceController:
             "Keep changes confined to this worktree.",
             "Do not edit the workspace root, other project checkouts, or archived docs.",
             "Use CONTEXT.md and docs/execution-runbook.md as the control-plane reference.",
-            "Write deliverables inside the worktree so archive can move them later.",
+            "Keep durable requirement artifacts in the task root outside child code worktrees.",
             "",
         ]
         return "\n".join(lines)
@@ -606,7 +606,7 @@ class WorkspaceController:
         existing = []
         if exclude_path.exists():
             existing = exclude_path.read_text(encoding="utf-8").splitlines()
-        patterns = [".workspace/", "doc/"]
+        patterns = [".workspace/"]
         changed = False
         for pattern in patterns:
             if pattern not in existing:
@@ -1080,60 +1080,71 @@ class WorkspaceController:
                 self.ensure_agents_local_link(binding.repo_root, path)
                 run_post_create_hook(binding.repo_root, path, hook_options)
 
-    def archive_requirement(
-        self, *, task_root: Path, discard_missing_docs: bool = False
+    def archive_requirement(  # noqa: C901
+        self,
+        *,
+        task_root: Path,
+        force: bool = False,
+        hook_options: HookOptions | None = None,
     ) -> dict[str, Any]:
+        hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
         worktrees = self.collect_manifest_worktrees(manifest)
         archive_root = self.docs_root / task_root.name
         ensure_dir(self.docs_root)
-        ensure_dir(archive_root)
-        moved: list[dict[str, Any]] = []
-        missing: list[str] = []
+        if not task_root.is_dir():
+            raise_workspace_error(f"task root is not a directory: {task_root}")
+        if archive_root.exists():
+            raise_workspace_error(f"archive target already exists: {archive_root}")
+        if not path_is_within(archive_root, self.docs_root.resolve()):
+            raise_workspace_error(
+                f"archive target must live under {self.docs_root}: {archive_root}"
+            )
+
+        operations: list[tuple[str, RepositoryBinding, Path]] = []
         for entry in worktrees:
             project_id = entry.get("project_id")
             relative_path = entry.get("path")
             if not isinstance(project_id, str) or not isinstance(relative_path, str):
                 raise_workspace_error("invalid worktree entry in manifest")
             worktree_path = (self.root / relative_path).resolve()
-            source_doc = worktree_path / "doc"
-            target_doc = archive_root / worktree_path.name
-            if not source_doc.exists():
-                missing.append(str(source_doc))
-                continue
-            if target_doc.exists() and any(target_doc.iterdir()):
-                raise_workspace_error(f"archive target already exists: {target_doc}")
-            ensure_dir(target_doc.parent)
-            shutil.move(str(source_doc), str(target_doc))
-            moved.append(
+            if not path_is_within(worktree_path, task_root.resolve()) or worktree_path == task_root:
+                raise_workspace_error(f"worktree path must live under task root: {worktree_path}")
+            binding = self.bind_repository(project_id)
+            if self.existing_worktree(binding.repo_root, worktree_path) is None:
+                raise_workspace_error(f"worktree is not registered for archive: {worktree_path}")
+            if not worktree_path.exists():
+                raise_workspace_error(f"worktree is missing: {worktree_path}")
+            if not force and git_status_porcelain(worktree_path):
+                raise_workspace_error(
+                    f"worktree is dirty; rerun with --force to remove it: {worktree_path}"
+                )
+            operations.append((project_id, binding, worktree_path))
+
+        removed: list[str] = []
+        hook_events: list[dict[str, Any]] = []
+        for project_id, binding, worktree_path in operations:
+            hook_result = run_pre_cleanup_hook(worktree_path, hook_options)
+            hook_events.append(
                 {
                     "project_id": project_id,
-                    "source": str(source_doc),
-                    "target": str(target_doc),
+                    "project": hook_result.project,
+                    "messages": hook_result.messages,
                 }
             )
-        if missing and not discard_missing_docs:
-            self._restore_archived_docs(moved)
-            message = (
-                "required worktree doc trees are missing; rerun with "
-                "--discard-missing-docs to archive anyway: " + ", ".join(missing)
-            )
-            raise_workspace_error(message)
+            self.remove_worktree(binding, worktree_path, force=force)
+            self.prune_worktrees(binding)
+            removed.append(str(worktree_path))
+
+        shutil.move(str(task_root), str(archive_root))
         return {
             "workspace_root": str(self.root),
             "task_root": str(task_root),
             "archive_root": str(archive_root),
-            "moved": moved,
-            "missing": missing,
+            "moved": {"source": str(task_root), "target": str(archive_root)},
+            "removed": removed,
+            "hooks": hook_events,
         }
-
-    def _restore_archived_docs(self, moved: list[dict[str, Any]]) -> None:
-        for entry in reversed(moved):
-            source = Path(entry["source"])
-            target = Path(entry["target"])
-            with suppress(Exception):
-                if target.exists() and not source.exists():
-                    shutil.move(str(target), str(source))
 
     def cleanup_requirement(
         self,
@@ -1145,13 +1156,6 @@ class WorkspaceController:
         hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
         worktrees = self.collect_manifest_worktrees(manifest)
-        archive_root = self.docs_root / task_root.name
-        if not archive_root.exists():
-            message = (
-                f"archive docs are missing for {task_root.name}; "
-                "run archive-requirement before cleanup"
-            )
-            raise_workspace_error(message)
         removed: list[str] = []
         hook_events: list[dict[str, Any]] = []
         for entry in worktrees:
@@ -1430,8 +1434,3 @@ class WorkspaceController:
             "template_path": str(template_path),
             "agents_path": str(target_path),
         }
-
-
-def archive_doc_tree(worktree_doc: Path, target_doc: Path) -> None:
-    ensure_dir(target_doc.parent)
-    shutil.move(str(worktree_doc), str(target_doc))

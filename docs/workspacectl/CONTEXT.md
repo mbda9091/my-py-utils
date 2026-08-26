@@ -69,13 +69,13 @@ workspace root 的工作指引文件。当前这个 workspace repo 里它保持 
 活跃 task root 内的最小机器可读记录，只保留 project、project scope、worktree、分支、可选的 source PRD URL 和 prompt 版本这类恢复所需信息。
 
 **durable deliverables**:
-worktree 里最终要迁移到 workspace 的文档树；当前主要指 requirement doc 和 implementation doc。
+task root 中不属于 child code worktree 的持久化产物；archive 时随整个 task root 一起迁移。
 
 **execution review appendix**:
 implementation doc 里的可回验附录，记录最终 scope、关键决策、主要命令和收尾结果，不单独形成第三份长期文档。
 
 **doc/**:
-workspace 根目录下的归档目录，保存迁移出来的需求文档和实现方案。
+workspace 根目录下的归档目录，保存整体迁移后的 requirement 目录。
 
 **startup prompt**:
 launcher 注入给 worktree agent 的运行时提示词，只携带当前 worktree 的事实和约束，不含 workspace 级说明。
@@ -90,7 +90,7 @@ launcher 注入给 worktree agent 的运行时提示词，只携带当前 worktr
 命令的机器可读输出模式，和 human readable 输出并存。
 
 **cleanup**:
-单独的收尾命令，删除 worktree、task root 和 `.workspace/task.yaml`；它在 archive 之后执行，不负责删 branch。
+处理尚未 archive 的 active task root，删除 child worktree 和 task root；archive 后不再需要重复执行，不负责删 branch。
 
 **status**:
 只读查看 workspace 结构的命令。

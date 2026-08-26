@@ -15,8 +15,8 @@
 1. `workspace.json`
 2. `projects/<id>`
 3. `worktrees/<date>-<slug>/<project-id>-<slug>/`
-4. `worktrees/<date>-<slug>/.workspace/task.yaml`
-5. `doc/<task-root-name>/`
+4. `worktrees/<date>-<slug>/.workspace/task.yaml`（active task）
+5. `doc/<task-root-name>/`（archived task）
 6. 需求对应的 git branch
 
 ## root AGENTS 模式
@@ -66,9 +66,8 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 
 - 进入单个 worktree 后，由内部 agent 继续工作。
 - workspace 控制面只负责准备和收尾。
-- worktree 内文档按内部规则生成。
-- 需求文档来自内部 PRD 转化。
-- 实现文档由 `grill-with-docs` 生成。
+- requirement 的持久化产物放在 task root 中，不放进代码 worktree。
+- worktree 只承载代码实现和临时执行环境。
 
 ### 5. `extend-requirement`
 
@@ -80,24 +79,24 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 
 ### 6. `archive-requirement`
 
-- 先确认 worktree 内的 doc 已产出。
-- 将整个 worktree 的 `doc/` 树搬到 `doc/<task-root-name>/<worktree-dir-name>/`。
-- 保留相对目录结构和原始文件名。
-- 不保留额外执行快照。
+- 先校验 task manifest、child worktree 注册状态、dirty 状态和 archive 目标。
+- 按 manifest 删除 requirement 下的 child Git worktree；dirty worktree 需要显式 `--force`。
+- 将剩余的整个 task root 直接搬到 `doc/<task-root-name>/`。
+- 不识别文件内容，不区分文档类型，不做蒸馏或额外快照。
+- archive 完成后不需要再执行 cleanup 来删除这些 child worktree。
 
 ### 7. `cleanup`
 
-- 在 archive 之后执行。
-- 如果 `doc/<task-root-name>/` 不存在，直接拒绝。
+- 只处理尚未 archive 的 active task root；archive 后的 task root 已经被移动，不再重复 cleanup。
 - 删除前执行对应的 pre-clean hook；Android 默认执行 `kkr clear`，default 项目在可用时清理 Watchman watch。
 - 删除 worktree、task root 和 `.workspace/task.yaml`。
 - 不负责删 branch。
 
 ## 归档后仍可看的东西
 
-- `doc/<task-root-name>/` 下的需求文档。
-- `doc/<task-root-name>/` 下的实现文档。
-- implementation doc 里的 execution review appendix。
+- `doc/<task-root-name>/` 下完整保留的 requirement 目录。
+- 目录内的原始文件、子目录和 task manifest。
+- requirement 产物中的 execution review appendix（如有）。
 
 ## execution review appendix
 

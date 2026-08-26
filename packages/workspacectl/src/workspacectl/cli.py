@@ -117,13 +117,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_hook_args(extend_parser)
     add_common_output_args(extend_parser)
 
-    archive_parser = subparsers.add_parser("archive-requirement", help="Archive worktree docs.")
-    add_task_root_arg(archive_parser)
-    archive_parser.add_argument(
-        "--discard-missing-docs",
-        action="store_true",
-        help="Archive even if some worktree doc trees are missing.",
+    archive_parser = subparsers.add_parser(
+        "archive-requirement", help="Remove requirement worktrees and archive the task root."
     )
+    add_task_root_arg(archive_parser)
+    archive_parser.add_argument("--force", action="store_true", help="Remove dirty worktrees.")
+    add_hook_args(archive_parser, cleanup=True)
     add_common_output_args(archive_parser)
 
     cleanup_parser = subparsers.add_parser(
@@ -189,14 +188,14 @@ def emit(  # noqa: C901, PLR0912, PLR0915
     elif command == "archive-requirement":
         print(f"task root: {result['task_root']}")
         print(f"archive root: {result['archive_root']}")
-        if result.get("moved"):
-            print("moved:")
-            for item in result["moved"]:
-                print(f"  - {item['project_id']}: {item['target']}")
-        if result.get("missing"):
-            print("missing:")
-            for item in result["missing"]:
+        moved = result.get("moved")
+        if moved:
+            print(f"moved: {moved['source']} -> {moved['target']}")
+        if result.get("removed"):
+            print("removed worktrees:")
+            for item in result["removed"]:
                 print(f"  - {item}")
+        emit_hook_events(result)
     elif command == "cleanup":
         print(f"task root: {result['task_root']}")
         if result.get("removed"):
@@ -317,7 +316,8 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
         task_root = controller.resolve_task_root(args.task_root)
         result = controller.archive_requirement(
             task_root=task_root,
-            discard_missing_docs=args.discard_missing_docs,
+            force=args.force,
+            hook_options=hook_options(args),
         )
         result["command"] = "archive-requirement"
         result["ok"] = True

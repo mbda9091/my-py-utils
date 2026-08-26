@@ -178,7 +178,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             assert code == 0
             assert (root / "AGENTS.md").read_text(encoding="utf-8") == "custom\n"
 
-    def test_create_archive_and_cleanup_multi_project(self) -> None:
+    def test_archive_moves_requirement_directory_and_removes_worktrees(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src1 = make_repo(root / "src-a")
@@ -242,21 +242,37 @@ class WorkspaceControllerTests(unittest.TestCase):
             assert not (alpha_worktree / "openspec").exists()
             assert (alpha_worktree / ".workspace" / "AGENTS.md").exists()
             assert (beta_worktree / ".workspace" / "AGENTS.md").exists()
-            (alpha_worktree / "doc").mkdir()
-            (alpha_worktree / "doc" / "requirement.md").write_text("alpha req", encoding="utf-8")
-            (beta_worktree / "doc").mkdir()
-            (beta_worktree / "doc" / "implementation.md").write_text("beta impl", encoding="utf-8")
-            code, out, _ = run_cli(root, "archive-requirement", "--task-root", str(task_root))
+            (task_root / "deliverables").mkdir()
+            (task_root / "deliverables" / "requirement.md").write_text(
+                "alpha req", encoding="utf-8"
+            )
+            (task_root / "deliverables" / "implementation.md").write_text(
+                "beta impl", encoding="utf-8"
+            )
+            code, out, _ = run_cli(
+                root,
+                "archive-requirement",
+                "--task-root",
+                str(task_root),
+                "--json",
+            )
             assert code == 0, out
+            archive_payload = json.loads(out)
             archive_root = root / "doc" / "2026-08-24-merchant-search-flow"
-            assert (archive_root / "alpha-merchant-search-flow" / "requirement.md").exists()
-            assert (archive_root / "beta-merchant-search-flow" / "implementation.md").exists()
-            assert not (alpha_worktree / "doc").exists()
-            code, out, _ = run_cli(root, "cleanup", "--task-root", str(task_root), "--json")
-            assert code == 0, out
-            cleanup_payload = json.loads(out)
-            assert cleanup_payload["hooks"][0]["project"] == "default"
+            assert (archive_root / "deliverables" / "requirement.md").exists()
+            assert (archive_root / "deliverables" / "implementation.md").exists()
+            assert (archive_root / ".workspace" / "task.yaml").exists()
             assert not task_root.exists()
+            assert not alpha_worktree.exists()
+            assert not beta_worktree.exists()
+            assert archive_payload["moved"] == {
+                "source": str(task_root.resolve()),
+                "target": str(archive_root.resolve()),
+            }
+            assert set(archive_payload["removed"]) == {
+                str(alpha_worktree.resolve()),
+                str(beta_worktree.resolve()),
+            }
             assert (src1 / ".git").exists()
             git_executable = shutil.which("git")
             assert git_executable is not None
@@ -417,7 +433,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             config = json.loads((worktree / "kconfig.json").read_text(encoding="utf-8"))
             assert config["remote"]["target"] == "~/code/android-android-hook"
 
-    def test_archive_requires_docs_unless_discard_flag(self) -> None:
+    def test_archive_does_not_require_doc_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src = make_repo(root / "src-a")
@@ -449,17 +465,135 @@ class WorkspaceControllerTests(unittest.TestCase):
             )
             assert code == 0, out
             task_root = root / "worktrees" / "2026-08-24-archive-guard"
-            code, out, err = run_cli(root, "archive-requirement", "--task-root", str(task_root))
-            assert code != 0
-            assert "missing" in (err or out)
-            code, out, _ = run_cli(
+            code, out, err = run_cli(
                 root,
                 "archive-requirement",
                 "--task-root",
                 str(task_root),
-                "--discard-missing-docs",
             )
             assert code == 0, out
+            assert not err
+            assert "moved: " in out
+            assert "removed worktrees:" in out
+            assert not task_root.exists()
+
+    def test_archive_requires_force_for_dirty_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            (root / "projects").mkdir()
+            (root / "projects" / "alpha").symlink_to(source, target_is_directory=True)
+            (root / "workspace.json").write_text(
+                json.dumps({"repositories": {"alpha": {}}}) + "\n", encoding="utf-8"
+            )
+            code, out, _ = run_cli(
+                root,
+                "create-requirement",
+                "--title",
+                "Dirty Archive",
+                "--project",
+                "alpha",
+                "--slug",
+                "dirty-archive",
+                "--task-date",
+                "2026-08-24",
+                "--git-username",
+                "merchant",
+            )
+            assert code == 0, out
+            task_root = root / "worktrees" / "2026-08-24-dirty-archive"
+            worktree = task_root / "alpha-dirty-archive"
+            (worktree / "README.md").write_text("dirty\n", encoding="utf-8")
+            code, out, err = run_cli(root, "archive-requirement", "--task-root", str(task_root))
+            assert code != 0
+            assert "dirty" in (err or out)
+            assert task_root.exists()
+            code, out, err = run_cli(
+                root,
+                "archive-requirement",
+                "--task-root",
+                str(task_root),
+                "--force",
+                "--json",
+            )
+            assert code == 0, (out, err)
+            assert not task_root.exists()
+
+    def test_archive_rejects_existing_destination_before_removing_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            (root / "projects").mkdir()
+            (root / "projects" / "alpha").symlink_to(source, target_is_directory=True)
+            (root / "workspace.json").write_text(
+                json.dumps({"repositories": {"alpha": {}}}) + "\n", encoding="utf-8"
+            )
+            code, out, _ = run_cli(
+                root,
+                "create-requirement",
+                "--title",
+                "Collision Archive",
+                "--project",
+                "alpha",
+                "--slug",
+                "collision-archive",
+                "--task-date",
+                "2026-08-24",
+                "--git-username",
+                "merchant",
+            )
+            assert code == 0, out
+            task_root = root / "worktrees" / "2026-08-24-collision-archive"
+            archive_root = root / "doc" / task_root.name
+            archive_root.mkdir(parents=True)
+            (archive_root / "existing.txt").write_text("keep\n", encoding="utf-8")
+            worktree = task_root / "alpha-collision-archive"
+            code, out, err = run_cli(root, "archive-requirement", "--task-root", str(task_root))
+            assert code != 0
+            assert "archive target already exists" in (err or out)
+            assert worktree.exists()
+            assert (archive_root / "existing.txt").read_text(encoding="utf-8") == "keep\n"
+
+    def test_cleanup_removes_unarchived_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            (root / "projects").mkdir()
+            (root / "projects" / "alpha").symlink_to(source, target_is_directory=True)
+            (root / "workspace.json").write_text(
+                json.dumps({"repositories": {"alpha": {}}}) + "\n", encoding="utf-8"
+            )
+            code, out, _ = run_cli(
+                root,
+                "create-requirement",
+                "--title",
+                "Unarchived Cleanup",
+                "--project",
+                "alpha",
+                "--slug",
+                "unarchived-cleanup",
+                "--task-date",
+                "2026-08-24",
+                "--git-username",
+                "merchant",
+            )
+            assert code == 0, out
+            task_root = root / "worktrees" / "2026-08-24-unarchived-cleanup"
+            worktree = task_root / "alpha-unarchived-cleanup"
+            code, out, err = run_cli(root, "cleanup", "--task-root", str(task_root), "--json")
+            assert code == 0, (out, err)
+            assert not task_root.exists()
+            assert not worktree.exists()
+            git_executable = shutil.which("git")
+            assert git_executable is not None
+            branch_list = subprocess.run(  # noqa: S603 - executable is resolved from PATH
+                [git_executable, "branch", "--list", "merchant/merchant/unarchived-cleanup"],
+                cwd=str(source),
+                check=True,
+                stdout=subprocess.PIPE,
+                text=True,
+            ).stdout
+            assert "merchant/merchant/unarchived-cleanup" in branch_list
 
     def test_extend_requirement_add_and_remove(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
