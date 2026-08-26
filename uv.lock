@@ -4,6 +4,7 @@ requires-python = ">=3.11"
 
 [manifest]
 members = [
+    "codex-hook-ctl",
     "hello-cli",
     "mac-cache-cleaner",
     "my-py-utils",
@@ -14,6 +15,11 @@ members = [
     "video2audio",
     "workspacectl",
 ]
+
+[[package]]
+name = "codex-hook-ctl"
+version = "0.1.0"
+source = { editable = "packages/codex-hook-ctl" }
 
 [[package]]
 name = "colorama"
@@ -75,6 +81,7 @@ name = "my-py-utils-cli"
 version = "0.1.0"
 source = { editable = "packages/my-py-utils-cli" }
 dependencies = [
+    { name = "codex-hook-ctl" },
     { name = "hello-cli" },
     { name = "mac-cache-cleaner" },
     { name = "node-modules-cleaner" },
@@ -85,6 +92,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "codex-hook-ctl", editable = "packages/codex-hook-ctl" },
     { name = "hello-cli", editable = "packages/hello-cli" },
     { name = "mac-cache-cleaner", editable = "packages/mac-cache-cleaner" },
     { name = "node-modules-cleaner", editable = "packages/node-modules-cleaner" },

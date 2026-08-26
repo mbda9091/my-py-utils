@@ -5,6 +5,7 @@ description = "Aggregate installer for all my-py-utils CLI commands."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "codex-hook-ctl",
     "hello-cli",
     "mac-cache-cleaner",
     "node-modules-cleaner",
@@ -14,6 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
+codex-hook-ctl = "codex_hook_ctl.cli:main"
 hello-util = "hello_cli.main:main"
 mac-cache-cleaner = "mac_cache_cleaner:main"
 node-modules-cleaner = "node_modules_cleaner:main"
@@ -28,6 +30,7 @@ node-modules-cleaner = { workspace = true }
 skill-sync = { workspace = true }
 video2audio = { workspace = true }
 workspacectl = { workspace = true }
+codex-hook-ctl = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]

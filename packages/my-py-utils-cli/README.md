@@ -11,6 +11,7 @@ uv tool install --editable packages/my-py-utils-cli
 Then run commands directly:
 
 ```bash
+codex-hook-ctl --help
 hello-util --help
 video2audio --help
 mac-cache-cleaner --help
