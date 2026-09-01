@@ -28,13 +28,32 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
    workspacectl archive-requirement --task-root worktrees/<date>-<slug>
    ```
 
+## Join existing collaboration branches
+
+Use a collaboration task when the branches already exist on `origin` and are
+shared with other developers:
+
+```bash
+workspacectl create-collaboration \
+  --slug <slug> \
+  --project-branch <project-id>:<existing-branch> \
+  --project-branch <project-id>:<existing-branch>
+```
+
+Each project maps to one branch. The mappings cannot be extended or archived;
+finish the collaboration with:
+
+```bash
+workspacectl cleanup --task-root worktrees/<date>-<slug>
+```
+
 ## What to remember
 
 - `status` shows the current state.
 - `doctor` checks for problems.
 - `update` refreshes the workspace view.
 - `archive-requirement` removes child worktrees and moves the complete task root into `doc/`.
-- The branch name is managed for you.
+- Requirement branch names are managed for you; collaboration branches are explicit.
 - Worktree hooks auto-detect Android, iOS, and default projects; use
   `--project-type` when detection needs an override.
 - The worktree agent should stay inside its own worktree.
@@ -45,3 +64,5 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
 - Prepare: `create-requirement`
 - Work: inside the generated worktree
 - Finish and archive: `archive-requirement`
+- Join shared branches: `create-collaboration`
+- Finish shared-branch work: `cleanup`

@@ -1,7 +1,7 @@
 [project]
 name = "workspacectl"
 version = "0.1.0"
-description = "Workspace controller for requirement-scoped Git worktrees."
+description = "Workspace controller for requirement and collaboration Git worktrees."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

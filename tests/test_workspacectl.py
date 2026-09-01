@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import os
 import shutil
@@ -9,12 +10,25 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
 from workspacectl.cli import main
+from workspacectl.core import (
+    TASK_KIND_REQUIREMENT,
+    WorkspaceController,
+    WorkspaceError,
+    git_branch_relation,
+    git_fetch_remote_branch,
+    git_local_branch_upstream,
+    git_worktree_path_for_branch,
+    task_kind,
+)
+from workspacectl.hooks import HookResult
 
 ARGPARSE_ERROR_EXIT_CODE = 2
+EXPECTED_HOOK_COUNT = 2
 
 
 def run_cli(cwd: Path, *argv: str) -> tuple[int, str, str]:
@@ -55,6 +69,16 @@ def git(*args: str, cwd: Path) -> None:
     )
 
 
+def git_output(*args: str, cwd: Path) -> str:
+    return subprocess.run(  # noqa: S603 - test controls the Git arguments
+        ["git", *args],  # noqa: S607 - git is the intended executable
+        cwd=str(cwd),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def make_repo(path: Path, branch: str = "main") -> Path:
     path.mkdir(parents=True, exist_ok=True)
     git("init", "-b", branch, cwd=path)
@@ -72,8 +96,50 @@ def make_repo(path: Path, branch: str = "main") -> Path:
     return path
 
 
+def make_remote_branch(repo: Path, branch: str, *, keep_local: bool = True) -> None:
+    git("switch", "-c", branch, cwd=repo)
+    (repo / "collaboration.txt").write_text(f"{branch}\n", encoding="utf-8")
+    git("add", "collaboration.txt", cwd=repo)
+    git("commit", "-m", f"add {branch}", cwd=repo)
+    git("push", "--set-upstream", "origin", branch, cwd=repo)
+    git("switch", "main", cwd=repo)
+    if not keep_local:
+        git("branch", "-D", branch, cwd=repo)
+
+
+def advance_remote_branch(repo: Path, peer: Path, branch: str) -> None:
+    remote = repo.parent / f"{repo.name}-origin.git"
+    git("clone", str(remote), str(peer), cwd=repo.parent)
+    git("config", "user.name", "Peer", cwd=peer)
+    git("config", "user.email", "peer@example.com", cwd=peer)
+    git("switch", branch, cwd=peer)
+    (peer / "peer.txt").write_text("remote advance\n", encoding="utf-8")
+    git("add", "peer.txt", cwd=peer)
+    git("commit", "-m", "advance remote branch", cwd=peer)
+    git("push", "origin", branch, cwd=peer)
+
+
+def configure_workspace_project(root: Path, project_id: str, repo: Path) -> None:
+    configure_workspace_projects(root, {project_id: repo})
+
+
+def configure_workspace_projects(root: Path, projects_by_id: dict[str, Path]) -> None:
+    projects = root / "projects"
+    projects.mkdir(exist_ok=True)
+    for project_id, repo in projects_by_id.items():
+        (projects / project_id).symlink_to(repo, target_is_directory=True)
+    (root / "workspace.json").write_text(
+        json.dumps({"repositories": {project_id: {} for project_id in projects_by_id}}) + "\n",
+        encoding="utf-8",
+    )
+
+
 def read_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def write_yaml(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
 def write_agent_templates(root: Path) -> None:
@@ -86,6 +152,533 @@ def write_agent_templates(root: Path) -> None:
 
 
 class WorkspaceControllerTests(unittest.TestCase):
+    def test_task_kind_defaults_legacy_manifests_to_requirement(self) -> None:
+        assert task_kind({"requirement": {"slug": "legacy"}}) == TASK_KIND_REQUIREMENT
+
+    def test_task_kind_rejects_unknown_explicit_kind(self) -> None:
+        with pytest.raises(WorkspaceError, match="invalid task manifest kind"):
+            task_kind({"kind": "unknown"})
+
+    def test_requirement_manifest_writes_explicit_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = WorkspaceController(Path(tmp))
+            manifest = controller.build_manifest(
+                title="Typed Requirement",
+                slug="typed-requirement",
+                source_prd_url=None,
+                scope=["alpha"],
+                worktrees=[],
+            )
+            assert manifest["kind"] == TASK_KIND_REQUIREMENT
+
+    def test_parse_project_branch_mappings_rejects_invalid_or_duplicate_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = WorkspaceController(Path(tmp))
+            mappings = controller.parse_project_branch_mappings(
+                ["android:merchant/alice/search", "ios:feature/search-ui"]
+            )
+            assert [(item.project_id, item.branch) for item in mappings] == [
+                ("android", "merchant/alice/search"),
+                ("ios", "feature/search-ui"),
+            ]
+            with pytest.raises(WorkspaceError, match="expected <project-id>:<branch>"):
+                controller.parse_project_branch_mappings(["android"])
+            with pytest.raises(WorkspaceError, match="duplicate project id"):
+                controller.parse_project_branch_mappings(["android:one", "android:two"])
+
+    def test_collaboration_preflight_rejects_unknown_project_and_invalid_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            configure_workspace_project(root, "alpha", source)
+            controller = WorkspaceController(root)
+            unknown = controller.parse_project_branch_mappings(["missing:feature/work"])
+            with pytest.raises(WorkspaceError, match="repository not found"):
+                controller.preflight_collaboration_branches(unknown)
+            invalid = controller.parse_project_branch_mappings(["alpha:bad branch"])
+            with pytest.raises(WorkspaceError, match="invalid Git branch name"):
+                controller.preflight_collaboration_branches(invalid)
+
+    def test_collaboration_preflight_fetches_missing_local_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            make_remote_branch(source, "feature/shared", keep_local=False)
+            configure_workspace_project(root, "alpha", source)
+            controller = WorkspaceController(root)
+            mappings = controller.parse_project_branch_mappings(["alpha:feature/shared"])
+            plans = controller.preflight_collaboration_branches(mappings)
+            assert len(plans) == 1
+            assert plans[0].relation == "missing"
+            assert plans[0].remote_ref == "origin/feature/shared"
+            assert git_local_branch_upstream(source, "feature/shared") is None
+            assert git_worktree_path_for_branch(source, "feature/shared") is None
+
+            missing = controller.parse_project_branch_mappings(["alpha:feature/missing"])
+            with pytest.raises(WorkspaceError, match="unable to fetch collaboration branch"):
+                controller.preflight_collaboration_branches(missing)
+
+    def test_collaboration_preflight_classifies_equal_behind_and_ahead_branches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch)
+            remote_ref = git_fetch_remote_branch(source, branch)
+            assert git_branch_relation(source, branch, remote_ref) == "equal"
+
+            advance_remote_branch(source, root / "peer", branch)
+            remote_ref = git_fetch_remote_branch(source, branch)
+            assert git_branch_relation(source, branch, remote_ref) == "behind"
+
+            git("switch", branch, cwd=source)
+            git("merge", "--ff-only", remote_ref, cwd=source)
+            (source / "local.txt").write_text("local advance\n", encoding="utf-8")
+            git("add", "local.txt", cwd=source)
+            git("commit", "-m", "advance local branch", cwd=source)
+            git("switch", "main", cwd=source)
+            assert git_branch_relation(source, branch, remote_ref) == "ahead"
+
+    def test_collaboration_preflight_rejects_upstream_divergence_and_occupied_branch(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch)
+            configure_workspace_project(root, "alpha", source)
+            controller = WorkspaceController(root)
+            mappings = controller.parse_project_branch_mappings([f"alpha:{branch}"])
+
+            git("branch", "--set-upstream-to", "origin/main", branch, cwd=source)
+            with pytest.raises(WorkspaceError, match="tracks 'origin/main'"):
+                controller.preflight_collaboration_branches(mappings)
+            git("branch", "--set-upstream-to", f"origin/{branch}", branch, cwd=source)
+
+            git("switch", branch, cwd=source)
+            with pytest.raises(WorkspaceError, match="already checked out"):
+                controller.preflight_collaboration_branches(mappings)
+            git("switch", "main", cwd=source)
+
+            (source / "local.txt").write_text("local divergence\n", encoding="utf-8")
+            git("switch", branch, cwd=source)
+            git("add", "local.txt", cwd=source)
+            git("commit", "-m", "local divergence", cwd=source)
+            git("switch", "main", cwd=source)
+            advance_remote_branch(source, root / "peer", branch)
+            with pytest.raises(WorkspaceError, match="has diverged"):
+                controller.preflight_collaboration_branches(mappings)
+
+    def test_create_collaboration_builds_multiple_explicit_branch_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alpha = make_repo(root / "src-alpha")
+            beta = make_repo(root / "src-beta")
+            make_remote_branch(alpha, "feature/alice-search", keep_local=False)
+            make_remote_branch(beta, "merchant/bob/search-api", keep_local=False)
+            local_agents = alpha / "AGENTS.local.md"
+            local_agents.write_text("local collaboration guidance\n", encoding="utf-8")
+            configure_workspace_projects(root, {"alpha": alpha, "beta": beta})
+
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "search-debug",
+                "--project-branch",
+                "alpha:feature/alice-search",
+                "--project-branch",
+                "beta:merchant/bob/search-api",
+                "--task-date",
+                "2026-09-01",
+                "--json",
+            )
+            assert code == 0, (out, err)
+            payload = json.loads(out)
+            task_root = root / "worktrees" / "2026-09-01-search-debug"
+            alpha_worktree = task_root / "alpha-search-debug"
+            beta_worktree = task_root / "beta-search-debug"
+            assert payload["kind"] == "collaboration"
+            assert payload["collaboration"] == {"slug": "search-debug"}
+            assert [(item["project_id"], item["branch"]) for item in payload["worktrees"]] == [
+                ("alpha", "feature/alice-search"),
+                ("beta", "merchant/bob/search-api"),
+            ]
+            manifest = read_yaml(task_root / ".workspace" / "task.yaml")
+            assert manifest["kind"] == "collaboration"
+            assert manifest["scope"] == ["alpha", "beta"]
+            assert git_output("branch", "--show-current", cwd=alpha_worktree) == (
+                "feature/alice-search"
+            )
+            assert git_output("branch", "--show-current", cwd=beta_worktree) == (
+                "merchant/bob/search-api"
+            )
+            assert git_output(
+                "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
+                cwd=alpha_worktree,
+            ) == "origin/feature/alice-search"
+            assert (alpha_worktree / "AGENTS.local.md").resolve() == local_agents.resolve()
+            agents = (alpha_worktree / ".workspace" / "AGENTS.md").read_text(encoding="utf-8")
+            assert "collaboration `search-debug`" in agents
+            assert "source PRD" not in agents
+            assert "belongs to requirement" not in agents
+            assert len(payload["hooks"]) == EXPECTED_HOOK_COUNT
+
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "search-debug",
+                "--project-branch",
+                "alpha:feature/alice-search",
+            )
+            assert code == 1
+            assert "slug already exists" in (err or out)
+
+    def test_create_collaboration_fast_forwards_and_sets_missing_upstream(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch)
+            advance_remote_branch(source, root / "peer", branch)
+            git("branch", "--unset-upstream", branch, cwd=source)
+            configure_workspace_project(root, "alpha", source)
+
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "shared-work",
+                "--project-branch",
+                f"alpha:{branch}",
+                "--task-date",
+                "2026-09-01",
+            )
+            assert code == 0, (out, err)
+            assert "alpha (feature/shared)" in out
+            worktree = root / "worktrees" / "2026-09-01-shared-work" / "alpha-shared-work"
+            assert git_output("rev-parse", "HEAD", cwd=worktree) == git_output(
+                "rev-parse", f"origin/{branch}", cwd=worktree
+            )
+            assert git_output(
+                "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
+                cwd=worktree,
+            ) == f"origin/{branch}"
+
+    def test_create_collaboration_rolls_back_after_later_hook_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alpha = make_repo(root / "src-alpha")
+            beta = make_repo(root / "src-beta")
+            alpha_branch = "feature/alpha-shared"
+            beta_branch = "feature/beta-shared"
+            make_remote_branch(alpha, alpha_branch, keep_local=False)
+            make_remote_branch(beta, beta_branch, keep_local=False)
+            configure_workspace_projects(root, {"alpha": alpha, "beta": beta})
+
+            with patch(
+                "workspacectl.core.run_post_create_hook",
+                side_effect=[
+                    HookResult(project="default", messages=["first hook ok"]),
+                    WorkspaceError("second hook failed"),
+                ],
+            ):
+                code, out, err = run_cli(
+                    root,
+                    "create-collaboration",
+                    "--slug",
+                    "rollback-work",
+                    "--project-branch",
+                    f"alpha:{alpha_branch}",
+                    "--project-branch",
+                    f"beta:{beta_branch}",
+                    "--task-date",
+                    "2026-09-01",
+                )
+            assert code == 1
+            assert "second hook failed" in (err or out)
+            assert not (root / "worktrees" / "2026-09-01-rollback-work").exists()
+            assert not git_output("branch", "--list", alpha_branch, cwd=alpha)
+            assert not git_output("branch", "--list", beta_branch, cwd=beta)
+            assert git_output(
+                "show-ref", "--verify", f"refs/remotes/origin/{alpha_branch}", cwd=alpha
+            )
+            assert git_output(
+                "show-ref", "--verify", f"refs/remotes/origin/{beta_branch}", cwd=beta
+            )
+
+    def test_create_collaboration_preflight_failure_leaves_no_task_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alpha = make_repo(root / "src-alpha")
+            beta = make_repo(root / "src-beta")
+            make_remote_branch(alpha, "feature/available", keep_local=False)
+            configure_workspace_projects(root, {"alpha": alpha, "beta": beta})
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "preflight-failure",
+                "--project-branch",
+                "alpha:feature/available",
+                "--project-branch",
+                "beta:feature/missing",
+                "--task-date",
+                "2026-09-01",
+            )
+            assert code == 1
+            assert "feature/missing" in (err or out)
+            assert not (root / "worktrees" / "2026-09-01-preflight-failure").exists()
+            assert not git_output("branch", "--list", "feature/available", cwd=alpha)
+
+    def test_collaboration_status_and_update_preserve_mappings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch, keep_local=False)
+            configure_workspace_project(root, "alpha", source)
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "status-work",
+                "--project-branch",
+                f"alpha:{branch}",
+                "--task-date",
+                "2026-09-01",
+            )
+            assert code == 0, (out, err)
+            task_root = root / "worktrees" / "2026-09-01-status-work"
+            worktree = task_root / "alpha-status-work"
+            manifest_path = task_root / ".workspace" / "task.yaml"
+            manifest_before = read_yaml(manifest_path)
+
+            code, out, err = run_cli(root, "status", "--json")
+            assert code == 0, (out, err)
+            task = json.loads(out)["active_tasks"][0]
+            assert task["kind"] == "collaboration"
+            assert task["collaboration"] == {"slug": "status-work"}
+            assert "requirement" not in task
+            assert task["worktrees"][0]["branch"] == branch
+            code, out, err = run_cli(root, "status")
+            assert code == 0, (out, err)
+            assert "collaboration status-work" in out
+            assert f"alpha: {branch}" in out
+
+            agents_path = worktree / ".workspace" / "AGENTS.md"
+            agents_path.write_text("stale\n", encoding="utf-8")
+            code, out, err = run_cli(root, "update", "--json")
+            assert code == 0, (out, err)
+            assert str(task_root.resolve()) in json.loads(out)["refreshed"]
+            assert read_yaml(manifest_path) == manifest_before
+            assert "collaboration `status-work`" in agents_path.read_text(encoding="utf-8")
+
+    def test_doctor_reports_collaboration_manifest_and_worktree_problems(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch, keep_local=False)
+            configure_workspace_project(root, "alpha", source)
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "doctor-work",
+                "--project-branch",
+                f"alpha:{branch}",
+                "--task-date",
+                "2026-09-01",
+            )
+            assert code == 0, (out, err)
+            task_root = root / "worktrees" / "2026-09-01-doctor-work"
+            worktree = task_root / "alpha-doctor-work"
+            manifest_path = task_root / ".workspace" / "task.yaml"
+            original = read_yaml(manifest_path)
+            original_worktrees = copy.deepcopy(original["worktrees"])
+
+            manifest = read_yaml(manifest_path)
+            manifest["collaboration"] = {}
+            write_yaml(manifest_path, manifest)
+            code, out, _ = run_cli(root, "doctor", "--json")
+            assert code == 1
+            assert json.loads(out)["issues"][0]["code"] == "invalid_manifest"
+
+            manifest = read_yaml(manifest_path)
+            manifest["collaboration"] = original["collaboration"]
+            manifest["worktrees"][0]["project_id"] = "missing"
+            write_yaml(manifest_path, manifest)
+            code, out, _ = run_cli(root, "doctor", "--json")
+            assert code == 1
+            assert "unknown_project" in {item["code"] for item in json.loads(out)["issues"]}
+
+            manifest = read_yaml(manifest_path)
+            manifest["worktrees"] = copy.deepcopy(original_worktrees)
+            manifest["worktrees"][0]["path"] = "projects/alpha"
+            write_yaml(manifest_path, manifest)
+            code, out, _ = run_cli(root, "doctor", "--json")
+            assert code == 1
+            assert "worktree_outside_task_root" in {
+                item["code"] for item in json.loads(out)["issues"]
+            }
+
+            manifest = read_yaml(manifest_path)
+            manifest["worktrees"] = copy.deepcopy(original_worktrees)
+            manifest["worktrees"][0]["branch"] = "feature/wrong"
+            write_yaml(manifest_path, manifest)
+            code, out, _ = run_cli(root, "doctor", "--json")
+            assert code == 1
+            assert "branch_mismatch" in {item["code"] for item in json.loads(out)["issues"]}
+
+            write_yaml(manifest_path, original)
+            git("worktree", "remove", str(worktree), cwd=source)
+            code, out, _ = run_cli(root, "doctor", "--json")
+            assert code == 1
+            assert "missing_worktree" in {item["code"] for item in json.loads(out)["issues"]}
+            worktree.mkdir()
+            code, out, _ = run_cli(root, "doctor", "--json")
+            assert code == 1
+            assert "unregistered_worktree" in {
+                item["code"] for item in json.loads(out)["issues"]
+            }
+
+    def test_cleanup_collaboration_protects_dirty_work_and_preserves_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch, keep_local=False)
+            configure_workspace_project(root, "alpha", source)
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "cleanup-work",
+                "--project-branch",
+                f"alpha:{branch}",
+                "--task-date",
+                "2026-09-01",
+            )
+            assert code == 0, (out, err)
+            task_root = root / "worktrees" / "2026-09-01-cleanup-work"
+            worktree = task_root / "alpha-cleanup-work"
+            (worktree / "dirty.txt").write_text("keep me\n", encoding="utf-8")
+
+            code, out, err = run_cli(root, "cleanup", "--task-root", str(task_root))
+            assert code == 1
+            assert "dirty" in (err or out)
+            assert worktree.exists()
+            assert git_output("branch", "--list", branch, cwd=source)
+
+            with patch(
+                "workspacectl.core.run_pre_cleanup_hook",
+                return_value=HookResult(project="default", messages=["cleanup hook"]),
+            ) as cleanup_hook:
+                code, out, err = run_cli(
+                    root,
+                    "cleanup",
+                    "--task-root",
+                    str(task_root),
+                    "--force",
+                    "--json",
+                )
+            assert code == 0, (out, err)
+            payload = json.loads(out)
+            assert payload["kind"] == "collaboration"
+            assert payload["hooks"][0]["messages"] == ["cleanup hook"]
+            cleanup_hook.assert_called_once()
+            assert not task_root.exists()
+            assert git_output("branch", "--list", branch, cwd=source)
+
+    def test_requirement_only_commands_reject_collaboration_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            branch = "feature/shared"
+            make_remote_branch(source, branch, keep_local=False)
+            configure_workspace_project(root, "alpha", source)
+            code, out, err = run_cli(
+                root,
+                "create-collaboration",
+                "--slug",
+                "fixed-work",
+                "--project-branch",
+                f"alpha:{branch}",
+                "--task-date",
+                "2026-09-01",
+            )
+            assert code == 0, (out, err)
+            task_root = root / "worktrees" / "2026-09-01-fixed-work"
+            worktree = task_root / "alpha-fixed-work"
+            manifest_path = task_root / ".workspace" / "task.yaml"
+            manifest_before = manifest_path.read_bytes()
+
+            code, out, err = run_cli(
+                root,
+                "extend-requirement",
+                "--task-root",
+                str(task_root),
+                "--add",
+                "beta",
+            )
+            assert code == 1
+            assert "does not support collaboration tasks" in (err or out)
+            code, out, err = run_cli(
+                root,
+                "archive-requirement",
+                "--task-root",
+                str(task_root),
+            )
+            assert code == 1
+            assert "does not support collaboration tasks" in (err or out)
+            assert worktree.exists()
+            assert manifest_path.read_bytes() == manifest_before
+            assert not (root / "doc" / task_root.name).exists()
+
+    def test_legacy_requirement_manifest_keeps_requirement_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_repo(root / "src-a")
+            configure_workspace_project(root, "alpha", source)
+            code, out, err = run_cli(
+                root,
+                "create-requirement",
+                "--title",
+                "Legacy Requirement",
+                "--slug",
+                "legacy-requirement",
+                "--project",
+                "alpha",
+                "--task-date",
+                "2026-09-01",
+                "--git-username",
+                "tester",
+            )
+            assert code == 0, (out, err)
+            task_root = root / "worktrees" / "2026-09-01-legacy-requirement"
+            manifest_path = task_root / ".workspace" / "task.yaml"
+            manifest = read_yaml(manifest_path)
+            manifest.pop("kind")
+            write_yaml(manifest_path, manifest)
+
+            code, out, err = run_cli(root, "status", "--json")
+            assert code == 0, (out, err)
+            task = json.loads(out)["active_tasks"][0]
+            assert task["kind"] == "requirement"
+            assert task["requirement"]["title"] == "Legacy Requirement"
+            code, out, err = run_cli(
+                root,
+                "archive-requirement",
+                "--task-root",
+                str(task_root),
+                "--json",
+            )
+            assert code == 0, (out, err)
+            assert (root / "doc" / task_root.name).exists()
+
     def test_create_requirement_requires_slug(self) -> None:
         stderr: list[str] = []
         with pytest.raises(SystemExit) as error, contextlib.redirect_stderr(_Capture(stderr)):

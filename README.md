@@ -14,7 +14,7 @@ packages/
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
   codex-hook-ctl/      Record and inject custom Codex hooks by name
-  workspacectl/         Controller for requirement-scoped Git worktrees
+  workspacectl/         Controller for requirement and collaboration Git worktrees
   my-py-utils-cli/      Aggregate installer for all workspace CLI commands
 tests/                  Workspace-level tests
 ```

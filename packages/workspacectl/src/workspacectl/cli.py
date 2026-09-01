@@ -101,6 +101,27 @@ def build_parser() -> argparse.ArgumentParser:
     add_hook_args(create_parser)
     add_common_output_args(create_parser)
 
+    collaboration_parser = subparsers.add_parser(
+        "create-collaboration",
+        help="Create worktrees for existing collaboration branches.",
+    )
+    collaboration_parser.add_argument(
+        "--slug",
+        required=True,
+        help="Collaboration slug: lowercase ASCII letters, digits, and hyphens.",
+    )
+    collaboration_parser.add_argument(
+        "--project-branch",
+        action="append",
+        required=True,
+        dest="project_branches",
+        metavar="PROJECT:BRANCH",
+        help="Registered project id and existing origin branch. Repeatable.",
+    )
+    collaboration_parser.add_argument("--task-date", help="Override the task-root date prefix.")
+    add_hook_args(collaboration_parser)
+    add_common_output_args(collaboration_parser)
+
     extend_parser = subparsers.add_parser("extend-requirement", help="Adjust a requirement scope.")
     add_task_root_arg(extend_parser)
     extend_parser.add_argument(
@@ -178,6 +199,13 @@ def emit(  # noqa: C901, PLR0912, PLR0915
         for item in result["worktrees"]:
             print(f"  - {item['project_id']}: {item['path']}")
         emit_hook_events(result)
+    elif command == "create-collaboration":
+        print(f"task root: {result['task_root']}")
+        print(f"collaboration: {result['collaboration']['slug']}")
+        print("worktrees:")
+        for item in result["worktrees"]:
+            print(f"  - {item['project_id']} ({item['branch']}): {item['path']}")
+        emit_hook_events(result)
     elif command == "extend-requirement":
         print(f"task root: {result['task_root']}")
         print(f"branch: {result['branch']}")
@@ -215,7 +243,15 @@ def emit(  # noqa: C901, PLR0912, PLR0915
             print(f"  - {repo['repo_id']} ({state})")
         print("active tasks:")
         for task in result.get("active_tasks", []):
-            print(f"  - {task['task_root_name']} -> {task['requirement'].get('title', '')}")
+            if task.get("kind") == "collaboration":
+                collaboration = task.get("collaboration", {})
+                print(
+                    f"  - {task['task_root_name']} -> collaboration {collaboration.get('slug', '')}"
+                )
+                for worktree in task.get("worktrees", []):
+                    print(f"      {worktree['project_id']}: {worktree['branch']}")
+            else:
+                print(f"  - {task['task_root_name']} -> {task['requirement'].get('title', '')}")
         print("archived tasks:")
         for task in result.get("archived_tasks", []):
             print(f"  - {task['task_root_name']}")
@@ -297,6 +333,16 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
             hook_options=hook_options(args),
         )
         result["command"] = "create-requirement"
+        result["ok"] = True
+        return result
+    if args.command == "create-collaboration":
+        result = controller.create_collaboration(
+            project_branch_values=args.project_branches,
+            slug=args.slug,
+            task_date=args.task_date,
+            hook_options=hook_options(args),
+        )
+        result["command"] = "create-collaboration"
         result["ok"] = True
         return result
     if args.command == "extend-requirement":

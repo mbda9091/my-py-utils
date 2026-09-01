@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import Any, Literal, NoReturn, cast
 
 from .hooks import (
     HookError,
@@ -34,6 +34,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover - fallback guard
 TASK_PROMPT_VERSION = "workspace-agent/v1"
 AGENT_MODES = ("usage", "development")
 DEFAULT_UPSTREAM = "HEAD"
+TASK_KIND_REQUIREMENT = "requirement"
+TASK_KIND_COLLABORATION = "collaboration"
+TASK_KINDS = (TASK_KIND_REQUIREMENT, TASK_KIND_COLLABORATION)
 REPO_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_RULE_MESSAGE = (
@@ -42,6 +45,7 @@ SLUG_RULE_MESSAGE = (
 )
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TASK_ROOT_PATTERN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)$")
+BranchRelation = Literal["missing", "equal", "behind", "ahead"]
 
 
 class WorkspaceError(RuntimeError):
@@ -61,9 +65,45 @@ def sanitize_segment(value: str) -> str:
     return value or "workspace"
 
 
-def validate_requirement_slug(slug: str) -> None:
+def validate_task_slug(slug: str, task_label: str) -> None:
     if not SLUG_PATTERN.fullmatch(slug):
-        raise_workspace_error(f"invalid requirement slug: {slug!r}; {SLUG_RULE_MESSAGE}")
+        raise_workspace_error(f"invalid {task_label} slug: {slug!r}; {SLUG_RULE_MESSAGE}")
+
+
+def validate_requirement_slug(slug: str) -> None:
+    validate_task_slug(slug, "requirement")
+
+
+def validate_collaboration_slug(slug: str) -> None:
+    validate_task_slug(slug, "collaboration")
+
+
+def task_kind(manifest: dict[str, Any]) -> str:
+    kind = manifest.get("kind", TASK_KIND_REQUIREMENT)
+    if not isinstance(kind, str) or kind not in TASK_KINDS:
+        raise_workspace_error(f"invalid task manifest kind: {kind!r}")
+    return kind
+
+
+def require_requirement_task(manifest: dict[str, Any], operation: str) -> None:
+    if task_kind(manifest) == TASK_KIND_REQUIREMENT:
+        return
+    raise_workspace_error(
+        f"{operation} does not support collaboration tasks; collaboration mappings are "
+        "immutable and collaboration tasks must be finished with cleanup"
+    )
+
+
+def collaboration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
+    collaboration = manifest.get("collaboration")
+    if not isinstance(collaboration, dict):
+        raise_workspace_error("task manifest is missing collaboration identity")
+    collaboration = cast("dict[str, Any]", collaboration)
+    slug = collaboration.get("slug")
+    if not isinstance(slug, str) or not slug:
+        raise_workspace_error("task manifest is missing collaboration slug")
+    validate_collaboration_slug(slug)
+    return collaboration
 
 
 def current_date_string() -> str:
@@ -128,6 +168,67 @@ def git_local_branch_exists(repo_root: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
+def validate_git_branch_name(repo_root: Path, branch: str) -> None:
+    try:
+        git_run(["check-ref-format", "--branch", branch], repo_root)
+    except WorkspaceError as exc:
+        raise_workspace_error(f"invalid Git branch name {branch!r}: {exc}", cause=exc)
+
+
+def git_fetch_remote_branch(repo_root: Path, branch: str) -> str:
+    remote_ref = f"origin/{branch}"
+    refspec = f"+refs/heads/{branch}:refs/remotes/{remote_ref}"
+    try:
+        git_run(["fetch", "origin", refspec], repo_root)
+    except WorkspaceError as exc:
+        raise_workspace_error(
+            f"unable to fetch collaboration branch {branch!r} from origin for {repo_root}: {exc}",
+            cause=exc,
+        )
+    return remote_ref
+
+
+def git_local_branch_upstream(repo_root: Path, branch: str) -> str | None:
+    output = git_run(
+        ["for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}"],
+        repo_root,
+    )
+    return output or None
+
+
+def git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(  # noqa: S603 - refs are validated Git inputs
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],  # noqa: S607
+        cwd=str(repo_root),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    message = (result.stderr or result.stdout or "").strip()
+    raise_workspace_error(message or f"unable to compare Git refs {ancestor} and {descendant}")
+
+
+def git_branch_relation(repo_root: Path, branch: str, remote_ref: str) -> BranchRelation:
+    if not git_local_branch_exists(repo_root, branch):
+        return "missing"
+    local_ref = f"refs/heads/{branch}"
+    local_is_ancestor = git_is_ancestor(repo_root, local_ref, remote_ref)
+    remote_is_ancestor = git_is_ancestor(repo_root, remote_ref, local_ref)
+    if local_is_ancestor and remote_is_ancestor:
+        return "equal"
+    if local_is_ancestor:
+        return "behind"
+    if remote_is_ancestor:
+        return "ahead"
+    raise_workspace_error(
+        f"local branch {branch!r} has diverged from {remote_ref}; reconcile it manually"
+    )
+
+
 def git_info_exclude_path(worktree_path: Path) -> Path:
     output = git_run(["rev-parse", "--git-path", "info/exclude"], worktree_path)
     return Path(output).resolve()
@@ -172,6 +273,16 @@ def git_branch_from_entry(entry: dict[str, str]) -> str:
     if branch_ref.startswith(prefix):
         return branch_ref[len(prefix) :]
     return branch_ref
+
+
+def git_worktree_path_for_branch(repo_root: Path, branch: str) -> Path | None:
+    for entry in git_worktree_list(repo_root):
+        if git_branch_from_entry(entry) != branch:
+            continue
+        worktree_value = entry.get("worktree")
+        if worktree_value:
+            return Path(worktree_value).expanduser().resolve()
+    return None
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -328,6 +439,21 @@ class WorktreeBinding:
     prompt_version: str = TASK_PROMPT_VERSION
 
 
+@dataclass(frozen=True)
+class ProjectBranchMapping:
+    project_id: str
+    branch: str
+
+
+@dataclass(frozen=True)
+class CollaborationBranchPlan:
+    mapping: ProjectBranchMapping
+    binding: RepositoryBinding
+    remote_ref: str
+    relation: BranchRelation
+    needs_upstream: bool
+
+
 class WorkspaceController:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or workspace_root_from_cwd()).resolve()
@@ -444,6 +570,76 @@ class WorkspaceController:
             repo_id=repo_id, config=repo_config, entry_path=entry_path, repo_root=repo_root
         )
 
+    def parse_project_branch_mappings(self, values: list[str]) -> list[ProjectBranchMapping]:
+        if not values:
+            raise_workspace_error("create-collaboration needs at least one project-branch mapping")
+        mappings: list[ProjectBranchMapping] = []
+        seen_projects: set[str] = set()
+        for value in values:
+            project_id, separator, branch = value.partition(":")
+            if not separator or not project_id or not branch:
+                raise_workspace_error(
+                    f"invalid project-branch mapping {value!r}; expected <project-id>:<branch>"
+                )
+            if not REPO_ID_PATTERN.fullmatch(project_id):
+                raise_workspace_error(
+                    f"invalid repository id in project-branch mapping: {project_id}"
+                )
+            if project_id in seen_projects:
+                raise_workspace_error(
+                    f"duplicate project id in project-branch mappings: {project_id}"
+                )
+            seen_projects.add(project_id)
+            mappings.append(ProjectBranchMapping(project_id=project_id, branch=branch))
+        return mappings
+
+    def preflight_collaboration_branches(
+        self, mappings: list[ProjectBranchMapping]
+    ) -> list[CollaborationBranchPlan]:
+        bound: list[tuple[ProjectBranchMapping, RepositoryBinding]] = []
+        seen_repositories: dict[Path, str] = {}
+        for mapping in mappings:
+            binding = self.bind_repository(mapping.project_id)
+            previous_project = seen_repositories.get(binding.repo_root)
+            if previous_project is not None:
+                raise_workspace_error(
+                    f"projects {previous_project!r} and {mapping.project_id!r} resolve to the "
+                    f"same repository; provide one project-branch mapping per repository"
+                )
+            seen_repositories[binding.repo_root] = mapping.project_id
+            validate_git_branch_name(binding.repo_root, mapping.branch)
+            bound.append((mapping, binding))
+
+        plans: list[CollaborationBranchPlan] = []
+        for mapping, binding in bound:
+            remote_ref = git_fetch_remote_branch(binding.repo_root, mapping.branch)
+            relation = git_branch_relation(binding.repo_root, mapping.branch, remote_ref)
+            needs_upstream = False
+            if relation != "missing":
+                occupied_path = git_worktree_path_for_branch(binding.repo_root, mapping.branch)
+                if occupied_path is not None:
+                    raise_workspace_error(
+                        f"local branch {mapping.branch!r} for project {mapping.project_id!r} "
+                        f"is already checked out at {occupied_path}"
+                    )
+                upstream = git_local_branch_upstream(binding.repo_root, mapping.branch)
+                if upstream is not None and upstream != remote_ref:
+                    raise_workspace_error(
+                        f"local branch {mapping.branch!r} for project {mapping.project_id!r} "
+                        f"tracks {upstream!r}, expected {remote_ref!r}"
+                    )
+                needs_upstream = upstream is None
+            plans.append(
+                CollaborationBranchPlan(
+                    mapping=mapping,
+                    binding=binding,
+                    remote_ref=remote_ref,
+                    relation=relation,
+                    needs_upstream=needs_upstream,
+                )
+            )
+        return plans
+
     def validate_config_bindings(self, config: dict[str, Any]) -> None:
         repositories_value: Any = config.get("repositories", {})
         if not isinstance(repositories_value, dict):
@@ -555,27 +751,52 @@ class WorkspaceController:
         branch: str,
     ) -> str:
         scope = ", ".join(manifest.get("scope", [])) or "(empty)"
-        requirement = manifest.get("requirement", {})
+        kind = task_kind(manifest)
         lines = [
             "# AGENTS.md",
             "",
-            "This worktree belongs to requirement "
-            f"`{requirement.get('title', '')}` (`{requirement.get('slug', '')}`).",
-            f"- task root: `{task_root.relative_to(self.root)}`",
-            f"- project id: `{project_id}`",
-            f"- source repo: `{repo_root}`",
-            f"- worktree path: `{worktree_path}`",
-            f"- branch: `{branch}`",
-            f"- source PRD: `{requirement.get('source_prd_url') or ''}`",
-            f"- scope: {scope}",
-            f"- prompt version: `{manifest.get('prompt_version', TASK_PROMPT_VERSION)}`",
-            "",
-            "Keep changes confined to this worktree.",
-            "Do not edit the workspace root, other project checkouts, or archived docs.",
-            "Use CONTEXT.md and docs/execution-runbook.md as the control-plane reference.",
-            "Keep durable requirement artifacts in the task root outside child code worktrees.",
-            "",
         ]
+        if kind == TASK_KIND_REQUIREMENT:
+            requirement = manifest.get("requirement", {})
+            if not isinstance(requirement, dict):
+                raise_workspace_error("task manifest requirement must be a mapping")
+            requirement = cast("dict[str, Any]", requirement)
+            lines.extend(
+                [
+                    "This worktree belongs to requirement "
+                    f"`{requirement.get('title', '')}` (`{requirement.get('slug', '')}`).",
+                    f"- source PRD: `{requirement.get('source_prd_url') or ''}`",
+                ]
+            )
+        else:
+            collaboration = collaboration_identity(manifest)
+            lines.append(
+                f"This worktree belongs to collaboration `{collaboration.get('slug', '')}`."
+            )
+        lines.extend(
+            [
+                f"- task root: `{task_root.relative_to(self.root)}`",
+                f"- project id: `{project_id}`",
+                f"- source repo: `{repo_root}`",
+                f"- worktree path: `{worktree_path}`",
+                f"- branch: `{branch}`",
+                f"- scope: {scope}",
+                f"- prompt version: `{manifest.get('prompt_version', TASK_PROMPT_VERSION)}`",
+                "",
+                "Keep changes confined to this worktree.",
+                "Do not edit the workspace root, other project checkouts, or archived docs.",
+                "Use CONTEXT.md and docs/execution-runbook.md as the control-plane reference.",
+            ]
+        )
+        if kind == TASK_KIND_REQUIREMENT:
+            lines.append(
+                "Keep durable requirement artifacts in the task root outside child code worktrees."
+            )
+        else:
+            lines.append(
+                "This collaboration has fixed project-to-branch mappings; finish it with cleanup."
+            )
+        lines.append("")
         return "\n".join(lines)
 
     def write_agents(
@@ -643,6 +864,7 @@ class WorkspaceController:
         slug: str,
         branch: str,
         source_ref: str | None = None,
+        tracking_ref: str | None = None,
     ) -> tuple[WorktreeBinding, bool]:
         target_path = task_root / f"{project_id}-{slug}"
         existing = self.existing_worktree(binding.repo_root, target_path)
@@ -664,9 +886,11 @@ class WorkspaceController:
                 raise_workspace_error(
                     f"missing upstream ref for new worktree {target_path}; provide one explicitly"
                 )
-            git_run(
-                ["worktree", "add", "-b", branch, str(target_path), source_ref], binding.repo_root
-            )
+            command = ["worktree", "add"]
+            if tracking_ref:
+                command.append("--track")
+            command.extend(["-b", branch, str(target_path), source_ref])
+            git_run(command, binding.repo_root)
         self.ensure_worktree_excludes(target_path)
         self.ensure_agents_local_link(binding.repo_root, target_path)
         return WorktreeBinding(project_id=project_id, path=target_path, branch=branch), False
@@ -709,6 +933,7 @@ class WorkspaceController:
         prompt_version: str = TASK_PROMPT_VERSION,
     ) -> dict[str, Any]:
         return {
+            "kind": TASK_KIND_REQUIREMENT,
             "requirement": {
                 "title": title,
                 "slug": slug,
@@ -716,6 +941,21 @@ class WorkspaceController:
             },
             "prompt_version": prompt_version,
             "scope": scope,
+            "worktrees": worktrees,
+        }
+
+    def build_collaboration_manifest(
+        self,
+        *,
+        slug: str,
+        worktrees: list[dict[str, Any]],
+        prompt_version: str = TASK_PROMPT_VERSION,
+    ) -> dict[str, Any]:
+        return {
+            "kind": TASK_KIND_COLLABORATION,
+            "collaboration": {"slug": slug},
+            "prompt_version": prompt_version,
+            "scope": [entry["project_id"] for entry in worktrees],
             "worktrees": worktrees,
         }
 
@@ -889,6 +1129,106 @@ class WorkspaceController:
             "prompt_version": TASK_PROMPT_VERSION,
         }
 
+    def create_collaboration(
+        self,
+        *,
+        project_branch_values: list[str],
+        slug: str,
+        task_date: str | None = None,
+        hook_options: HookOptions | None = None,
+    ) -> dict[str, Any]:
+        hook_options = hook_options or HookOptions()
+        validate_collaboration_slug(slug)
+        mappings = self.parse_project_branch_mappings(project_branch_values)
+        collisions = self.slug_collisions(slug)
+        if collisions:
+            raise_workspace_error(
+                f"slug already exists: {slug}. choose another collaboration slug. "
+                f"matches: {', '.join(collisions)}"
+            )
+        task_date = task_date or current_date_string()
+        task_root = self.task_root_path(task_date, slug)
+        if task_root.exists():
+            raise_workspace_error(f"task root already exists: {task_root}")
+
+        plans = self.preflight_collaboration_branches(mappings)
+        worktrees = [
+            {
+                "project_id": plan.mapping.project_id,
+                "path": self.relative_manifest_path(
+                    task_root / f"{plan.mapping.project_id}-{slug}"
+                ),
+                "branch": plan.mapping.branch,
+            }
+            for plan in plans
+        ]
+        manifest = self.build_collaboration_manifest(slug=slug, worktrees=worktrees)
+        created: list[tuple[RepositoryBinding, Path]] = []
+        branches_created: set[tuple[Path, str]] = set()
+        hook_events: list[dict[str, Any]] = []
+        try:
+            for plan in plans:
+                target_path = task_root / f"{plan.mapping.project_id}-{slug}"
+                created.append((plan.binding, target_path))
+                if plan.relation == "missing":
+                    branches_created.add((plan.binding.repo_root, plan.mapping.branch))
+                worktree_binding, reused = self.ensure_worktree(
+                    binding=plan.binding,
+                    task_root=task_root,
+                    project_id=plan.mapping.project_id,
+                    slug=slug,
+                    branch=plan.mapping.branch,
+                    source_ref=plan.remote_ref,
+                    tracking_ref=plan.remote_ref if plan.relation == "missing" else None,
+                )
+                if reused:
+                    raise_workspace_error(
+                        f"collaboration worktree unexpectedly already exists: "
+                        f"{worktree_binding.path}"
+                    )
+                if plan.needs_upstream:
+                    git_run(
+                        ["branch", "--set-upstream-to", plan.remote_ref, plan.mapping.branch],
+                        worktree_binding.path,
+                    )
+                if plan.relation == "behind":
+                    git_run(["merge", "--ff-only", plan.remote_ref], worktree_binding.path)
+                hook_result = run_post_create_hook(
+                    plan.binding.repo_root,
+                    worktree_binding.path,
+                    hook_options,
+                )
+                hook_events.append(
+                    {
+                        "project_id": plan.mapping.project_id,
+                        "project": hook_result.project,
+                        "messages": hook_result.messages,
+                    }
+                )
+                self.write_agents(
+                    task_root=task_root,
+                    manifest=manifest,
+                    worktree=worktree_binding,
+                    repo_root=plan.binding.repo_root,
+                )
+            self.save_task_manifest(task_root, manifest)
+        except Exception:
+            self._rollback_created_worktrees(created, branches_created)
+            if task_root.exists():
+                shutil.rmtree(task_root, ignore_errors=True)
+            raise
+        return {
+            "workspace_root": str(self.root),
+            "task_root": str(task_root),
+            "task_root_name": task_root.name,
+            "kind": TASK_KIND_COLLABORATION,
+            "collaboration": manifest["collaboration"],
+            "scope": manifest["scope"],
+            "worktrees": worktrees,
+            "hooks": hook_events,
+            "prompt_version": TASK_PROMPT_VERSION,
+        }
+
     def _rollback_created_worktrees(
         self,
         created: list[tuple[RepositoryBinding, Path]],
@@ -896,7 +1236,7 @@ class WorkspaceController:
     ) -> None:
         for binding, path in reversed(created):
             with suppress(Exception):
-                if path.exists():
+                if path.exists() or self.existing_worktree(binding.repo_root, path) is not None:
                     self.remove_worktree(binding, path, force=True)
         for repo_root, branch in branches_created:
             with suppress(Exception):
@@ -915,6 +1255,7 @@ class WorkspaceController:
     ) -> dict[str, Any]:
         hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
+        require_requirement_task(manifest, "extend-requirement")
         requirement = manifest.get("requirement", {})
         slug = requirement.get("slug")
         title = requirement.get("title")
@@ -1089,6 +1430,7 @@ class WorkspaceController:
     ) -> dict[str, Any]:
         hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
+        require_requirement_task(manifest, "archive-requirement")
         worktrees = self.collect_manifest_worktrees(manifest)
         archive_root = self.docs_root / task_root.name
         ensure_dir(self.docs_root)
@@ -1155,9 +1497,11 @@ class WorkspaceController:
     ) -> dict[str, Any]:
         hook_options = hook_options or HookOptions()
         manifest = self.load_task_manifest(task_root)
+        kind = task_kind(manifest)
+        if kind == TASK_KIND_COLLABORATION:
+            collaboration_identity(manifest)
         worktrees = self.collect_manifest_worktrees(manifest)
-        removed: list[str] = []
-        hook_events: list[dict[str, Any]] = []
+        operations: list[tuple[str, RepositoryBinding, Path]] = []
         for entry in worktrees:
             project_id = entry.get("project_id")
             relative_path = entry.get("path")
@@ -1165,11 +1509,17 @@ class WorkspaceController:
                 raise_workspace_error("invalid worktree entry in manifest")
             binding = self.bind_repository(project_id)
             worktree_path = (self.root / relative_path).resolve()
+            if not path_is_within(worktree_path, task_root.resolve()) or worktree_path == task_root:
+                raise_workspace_error(f"worktree path must live under task root: {worktree_path}")
             if not worktree_path.exists():
                 continue
             if not force and git_status_porcelain(worktree_path):
                 message = f"worktree is dirty; rerun with --force to remove it: {worktree_path}"
                 raise_workspace_error(message)
+            operations.append((project_id, binding, worktree_path))
+        removed: list[str] = []
+        hook_events: list[dict[str, Any]] = []
+        for project_id, binding, worktree_path in operations:
             hook_result = run_pre_cleanup_hook(worktree_path, hook_options)
             hook_events.append(
                 {
@@ -1186,6 +1536,7 @@ class WorkspaceController:
         return {
             "workspace_root": str(self.root),
             "task_root": str(task_root),
+            "kind": kind,
             "removed": removed,
             "hooks": hook_events,
         }
@@ -1230,15 +1581,19 @@ class WorkspaceController:
         tasks: list[dict[str, Any]] = []
         for task_root in self.active_task_roots():
             manifest = self.load_task_manifest(task_root)
-            tasks.append(
-                {
-                    "task_root": str(task_root),
-                    "task_root_name": task_root.name,
-                    "requirement": manifest.get("requirement", {}),
-                    "scope": manifest.get("scope", []),
-                    "worktrees": manifest.get("worktrees", []),
-                }
-            )
+            kind = task_kind(manifest)
+            task: dict[str, Any] = {
+                "task_root": str(task_root),
+                "task_root_name": task_root.name,
+                "kind": kind,
+                "scope": manifest.get("scope", []),
+                "worktrees": manifest.get("worktrees", []),
+            }
+            if kind == TASK_KIND_REQUIREMENT:
+                task["requirement"] = manifest.get("requirement", {})
+            else:
+                task["collaboration"] = collaboration_identity(manifest)
+            tasks.append(task)
         archives = [
             {
                 "archive_root": str(archive_root),
@@ -1317,6 +1672,9 @@ class WorkspaceController:
         for task_root in self.active_task_roots():
             try:
                 manifest = self.load_task_manifest(task_root)
+                kind = task_kind(manifest)
+                if kind == TASK_KIND_COLLABORATION:
+                    collaboration_identity(manifest)
             except WorkspaceError as exc:
                 issues.append(
                     {
@@ -1358,6 +1716,20 @@ class WorkspaceController:
                     )
                     continue
                 worktree_path = (self.root / relative_path).resolve()
+                if (
+                    not path_is_within(worktree_path, task_root.resolve())
+                    or worktree_path == task_root
+                ):
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "code": "worktree_outside_task_root",
+                            "message": f"worktree path must live under task root: {worktree_path}",
+                            "task_root": str(task_root),
+                            "project_id": project_id,
+                        }
+                    )
+                    continue
                 if not worktree_path.exists():
                     issues.append(
                         {

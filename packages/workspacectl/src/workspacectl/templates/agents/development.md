@@ -47,6 +47,8 @@ These are runtime directories. Do not treat them as source unless you are testin
 - Do not add hidden generated project catalogs.
 - Do not make `init` do update or reconcile work.
 - Do not make `cleanup` delete branches.
+- Treat a manifest without `kind` as a legacy requirement, and keep collaboration mappings immutable.
+- Never reconcile collaboration branches with reset, rebase, force-update, or push.
 - Keep user-facing mode simple; move implementation detail here.
 
 ## Return to usage
