@@ -8,10 +8,12 @@ import struct
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from private_pack import planning
 from private_pack.manifest import PackError, decrypt_manifest
-from private_pack.planning import Snapshot
+from private_pack.planning import Snapshot, inventory
 from private_pack.storage import (
     check_capabilities,
     commit_directory,
@@ -21,6 +23,10 @@ from private_pack.storage import (
     write_private,
 )
 from private_pack.workflow import keygen, pack
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+    from io import BufferedReader
 
 
 @pytest.mark.parametrize("kind", ["empty", "nonempty", "symlink", "file"])
@@ -197,12 +203,61 @@ def test_macos_acl_parent_rejected(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("name", ["program.exe", "脚本 空间.txt"])
-def test_path_and_handle_identity_agree(tmp_path: Path, name: str) -> None:
+def test_inventory_and_handle_snapshot_agree(tmp_path: Path, name: str) -> None:
     path = tmp_path / name
     path.write_bytes(b"fixture")
-    before = Snapshot.from_stat(path.stat())
+    os.utime(path, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+    before = inventory(tmp_path)[name]
     with open_source(tmp_path, name) as stream:
         assert Snapshot.from_stat(os.fstat(stream.fileno())) == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows file snapshot behavior")
+@pytest.mark.parametrize("change", ["none", "modify", "replace"])
+def test_windows_pack_checks_file_changes(tmp_path: Path, change: str) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "file.txt"
+    path.write_bytes(b"original")
+    os.utime(path, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+    key = tmp_path / "key"
+    keygen(key)
+    output = tmp_path / "output"
+
+    def change_source(_done: int, _total: int) -> None:
+        if change == "modify":
+            path.write_bytes(b"modified content")
+        elif change == "replace":
+            path.unlink()
+            path.write_bytes(b"replacement")
+
+    if change == "none":
+        assert pack(source, output, key, change_source) == 1
+        assert (output / "manifest.enc").is_file()
+    else:
+        with pytest.raises(PackError, match="changed"):
+            pack(source, output, key, change_source)
+        assert not output.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows scan identity check")
+def test_windows_scan_rejects_file_replaced_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "file"
+    path.write_bytes(b"original")
+    original_open = open_source
+
+    def replace_before_open(root: Path, relative: str) -> AbstractContextManager[BufferedReader]:
+        path.rename(tmp_path / "moved")
+        path.write_bytes(b"replacement")
+        return original_open(root, relative)
+
+    monkeypatch.setattr(planning, "open_source", replace_before_open)
+    with pytest.raises(PackError, match="changed during scanning"):
+        inventory(source)
 
 
 def test_source_parent_replacement_never_reads_outside(tmp_path: Path) -> None:

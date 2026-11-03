@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 import stat
 import sys
@@ -7,10 +8,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from private_pack.manifest import Entry, Manifest, PackError, Padding, make_password, safe_name
-from private_pack.storage import is_link
+from private_pack.storage import is_link, open_source
 
 if TYPE_CHECKING:
-    import os
     from pathlib import Path
 
 
@@ -49,7 +49,15 @@ def inventory(root: Path) -> dict[str, Snapshot]:
         if path != root and not safe_name(path.name):
             msg = "Input contains an unsupported filename."
             raise PackError(msg)
-        result[relative] = Snapshot.from_stat(info)
+        if sys.platform == "win32" and stat.S_ISREG(info.st_mode):
+            with open_source(root, relative) as stream:
+                opened = os.fstat(stream.fileno())
+                if (info.st_dev, info.st_ino) != (opened.st_dev, opened.st_ino):
+                    msg = "Source changed during scanning."
+                    raise PackError(msg)
+                result[relative] = Snapshot.from_stat(opened)
+        else:
+            result[relative] = Snapshot.from_stat(info)
         if stat.S_ISDIR(info.st_mode):
             for child in sorted(path.iterdir()):
                 visit(child)
