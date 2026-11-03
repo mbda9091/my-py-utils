@@ -9,12 +9,14 @@ dependencies = [
     "hello-cli",
     "mac-cache-cleaner",
     "node-modules-cleaner",
+    "private-pack",
     "skill-sync",
     "video2audio",
     "workspacectl",
 ]
 
 [project.scripts]
+private-pack = "private_pack.main:main"
 codex-hook-ctl = "codex_hook_ctl.cli:main"
 hello-util = "hello_cli.main:main"
 mac-cache-cleaner = "mac_cache_cleaner:main"
@@ -31,6 +33,7 @@ skill-sync = { workspace = true }
 video2audio = { workspace = true }
 workspacectl = { workspace = true }
 codex-hook-ctl = { workspace = true }
+private-pack = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]

@@ -13,6 +13,7 @@ packages/
   video2audio/          CLI for extracting audio from video files with ffmpeg
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
+  private-pack/        Encrypted per-item 7z archives with a protected manifest
   codex-hook-ctl/      Record and inject custom Codex hooks by name
   workspacectl/         Controller for requirement and collaboration Git worktrees
   my-py-utils-cli/      Aggregate installer for all workspace CLI commands
@@ -40,6 +41,7 @@ uv run --package node-modules-cleaner node-modules-cleaner ~/Code --dry-run
 uv run --package codex-hook-ctl codex-hook-ctl --help
 uv run --package skill-sync skill-sync --help
 uv run --package workspacectl workspacectl --help
+uv run --package private-pack private-pack --help
 uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email bozieg@qq.com
 ```
 
@@ -89,7 +91,10 @@ node-modules-cleaner
 codex-hook-ctl
 skill-sync
 workspacectl
+private-pack
 ```
+
+Encrypted archive usage: [private-pack README](packages/private-pack/README.md).
 
 ## Add A New CLI
 
