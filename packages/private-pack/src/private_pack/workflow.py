@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from private_pack.archive import create_archive
@@ -15,7 +14,14 @@ from private_pack.manifest import (
     encrypt_manifest,
 )
 from private_pack.planning import inventory, make_plan, validate_paths
-from private_pack.storage import commit_directory, read_key, require_linux, write_private
+from private_pack.storage import (
+    check_capabilities,
+    commit_directory,
+    make_private_directory,
+    private_temp_directory,
+    read_key,
+    write_private,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,7 +45,6 @@ def pack(
     key_file: Path,
     progress: Callable[[int, int], None] | None = None,
 ) -> int:
-    require_linux()
     root, target = validate_paths(source, output, key_file)
     key = read_key(key_file)
     snapshot = inventory(root)
@@ -47,10 +52,11 @@ def pack(
     if any((s.device, s.inode) == (key_info.st_dev, key_info.st_ino) for s in snapshot.values()):
         msg = "Input contains a hard link to the key file."
         raise PackError(msg)
+    check_capabilities(target.parent)
     manifest = make_plan(snapshot)
-    with TemporaryDirectory(prefix=".private-pack-", dir=target.parent) as temporary:
+    with private_temp_directory(target.parent) as temporary:
         staging = Path(temporary) / "batch"
-        staging.mkdir(mode=0o700)
+        make_private_directory(staging)
         for index, entry in enumerate(manifest.entries, 1):
             create_archive(root, staging, entry, manifest.archive_password, snapshot)
             if progress is not None:

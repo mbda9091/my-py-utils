@@ -130,8 +130,9 @@ def test_pack_roundtrip_and_repeat(batch: tuple[Path, Path, Path]) -> None:
     assert pack(source, output, key) == BATCH_COUNT
     manifest = decrypt_manifest((output / "manifest.enc").read_bytes(), key.read_bytes())
     assert len(list(output.iterdir())) == BATCH_COUNT + 1
-    assert stat.S_IMODE(output.stat().st_mode) == PRIVATE_DIRECTORY_MODE
-    assert stat.S_IMODE((output / "manifest.enc").stat().st_mode) == PRIVATE_FILE_MODE
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == PRIVATE_DIRECTORY_MODE
+        assert stat.S_IMODE((output / "manifest.enc").stat().st_mode) == PRIVATE_FILE_MODE
     digests: dict[str, str] = {}
     for entry in manifest.entries:
         archive = output / entry.archive_name
@@ -170,6 +171,8 @@ def test_pack_roundtrip_and_repeat(batch: tuple[Path, Path, Path]) -> None:
 def test_independent_7zip(batch: tuple[Path, Path, Path]) -> None:
     executable = os.environ.get("PRIVATE_PACK_7Z") or shutil.which("7zz") or shutil.which("7z")
     if executable is None:
+        if os.environ.get("CI"):
+            pytest.fail("Independent 7-Zip is required in CI")
         pytest.skip("Set PRIVATE_PACK_7Z to run real 7-Zip compatibility checks")
     source, output, key = batch
     pack(source, output, key)
@@ -231,6 +234,8 @@ def test_invalid_inputs(batch: tuple[Path, Path, Path], case: str) -> None:
     elif case == "symlink":
         (source / "link").symlink_to(key)
     elif case == "fifo":
+        if os.name == "nt":
+            pytest.skip("POSIX FIFO is not a Windows file type")
         os.mkfifo(source / "fifo")
     elif case == "key-inside":
         key = source / "key"
@@ -318,7 +323,7 @@ def test_open_source_refuses_parent_symlink(tmp_path: Path) -> None:
     root.mkdir()
     (tmp_path / "secret").write_bytes(b"outside")
     (root / "link").symlink_to(tmp_path, target_is_directory=True)
-    with pytest.raises(NotADirectoryError), open_source(root, "link/secret"):
+    with pytest.raises((OSError, PackError)), open_source(root, "link/secret"):
         pytest.fail("Followed a parent symlink")
 
 
@@ -337,8 +342,9 @@ def test_cli_and_private_outputs(
         == 0
     )
     assert decode_manifest(plain.read_bytes()) == manifest
-    assert stat.S_IMODE(plain.stat().st_mode) == PRIVATE_FILE_MODE
-    assert stat.S_IMODE(key.stat().st_mode) == PRIVATE_FILE_MODE
+    if os.name != "nt":
+        assert stat.S_IMODE(plain.stat().st_mode) == PRIVATE_FILE_MODE
+        assert stat.S_IMODE(key.stat().st_mode) == PRIVATE_FILE_MODE
     assert main(["keygen", "--output", str(key)]) == 1
     original = plain.read_bytes()
     with pytest.raises(FileExistsError):

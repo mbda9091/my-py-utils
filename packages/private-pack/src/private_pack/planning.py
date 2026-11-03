@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import secrets
 import stat
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from private_pack.manifest import Entry, Manifest, PackError, Padding, make_password, safe_name
+from private_pack.storage import is_link
 
 if TYPE_CHECKING:
     import os
@@ -26,7 +28,9 @@ class Snapshot:
         return cls(
             value.st_dev,
             value.st_ino,
-            value.st_mode,
+            # Windows stat adds executable bits from the filename; fstat has no
+            # filename and cannot reproduce them. File type remains authoritative.
+            stat.S_IFMT(value.st_mode) if sys.platform == "win32" else value.st_mode,
             value.st_size,
             value.st_mtime_ns,
             value.st_ctime_ns,
@@ -38,7 +42,7 @@ def inventory(root: Path) -> dict[str, Snapshot]:
 
     def visit(path: Path) -> None:
         info = path.lstat()
-        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        if is_link(info) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
             msg = "Input contains a symlink or special file."
             raise PackError(msg)
         relative = path.relative_to(root).as_posix()
@@ -74,9 +78,14 @@ def make_plan(snapshot: dict[str, Snapshot]) -> Manifest:
 
 
 def validate_paths(source: Path, output: Path, key_file: Path) -> tuple[Path, Path]:
-    if source.is_symlink() or not source.is_dir():
+    if is_link(source.lstat()) or not source.is_dir():
         msg = "Input must be a directory, not a symlink."
         raise PackError(msg)
+    for path in (source, key_file):
+        for component in (path.absolute(), *path.absolute().parents):
+            if is_link(component.lstat()):
+                msg = "Input and key paths must not contain symlinks or reparse points."
+                raise PackError(msg)
     root = source.resolve(strict=True)
     if output.is_symlink() or output.exists():
         msg = "Output already exists."

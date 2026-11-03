@@ -1,0 +1,113 @@
+name: private-pack native and interoperability
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2022]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: ${{ matrix.python }}
+          version: '0.11.28'
+      - name: Install independent tools
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y 7zip acl ;;
+            macOS) brew install sevenzip; echo 'TMPDIR=/private/tmp' >> "$GITHUB_ENV" ;;
+            Windows) echo 'C:\Program Files\7-Zip' >> "$GITHUB_PATH" ;;
+          esac
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-groups --all-packages
+      - name: Quality and Linux regression
+        if: runner.os == 'Linux'
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen pyright
+          uv run --frozen pytest --junitxml=full-suite.xml
+      - name: Native private-pack tests
+        run: uv run --frozen pytest tests/test_private_pack.py tests/test_private_pack_platform.py --junitxml=native.xml
+      - name: Build
+        run: uv build --all-packages
+      - name: Install wheel in isolated environment
+        run: |
+          uv venv wheel-smoke
+          if [ "$RUNNER_OS" = Windows ]; then
+            py=wheel-smoke/Scripts/python.exe
+          else
+            py=wheel-smoke/bin/python
+          fi
+          uv pip install --python "$py" dist/private_pack-*.whl
+          "$py" tests/private_pack_interop.py produce wheel-fixture
+      - name: Produce interchange fixture
+        if: matrix.python == '3.11' && matrix.os != 'macos-15-intel'
+        run: uv run --frozen python tests/private_pack_interop.py produce fixture
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.python == '3.11' && matrix.os != 'macos-15-intel'
+        with:
+          name: fixture-${{ matrix.os }}
+          path: fixture/
+          retention-days: 3
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: native-${{ matrix.os }}-${{ matrix.python }}
+          path: |
+            *.xml
+            wheel-fixture/evidence.json
+          retention-days: 3
+          if-no-files-found: error
+  interchange:
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: '3.11'
+          version: '0.11.28'
+      - name: Install independent tools
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y 7zip ;;
+            macOS) brew install sevenzip; echo 'TMPDIR=/private/tmp' >> "$GITHUB_ENV" ;;
+            Windows) echo 'C:\Program Files\7-Zip' >> "$GITHUB_PATH" ;;
+          esac
+      - run: uv sync --frozen --package private-pack
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: fixture-*
+          path: fixtures
+      - name: Consume all three producer artifacts
+        run: uv run --frozen python tests/private_pack_interop.py consume fixtures
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: interchange-${{ matrix.os }}
+          path: interop-results/**/result.json
+          retention-days: 3
+          if-no-files-found: error

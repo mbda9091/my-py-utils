@@ -65,3 +65,14 @@ PRIVATE_PACK_7Z=/path/to/7zz uv run pytest tests/test_private_pack.py
 
 [设计与迭代记录](../../docs/private-pack-design.md) ·
 [实施清单](../../docs/private-pack-implementation.md)
+
+## 跨平台实现状态
+
+已加入macOS与原生Windows存储适配和CI，Linux本轮回归已通过。
+macOS/Windows尚未完成原生验收，因此暂不扩大正式支持声明。
+Windows实现限本地NTFS，私有对象创建时授权当前用户及LocalSystem；macOS拒绝在带扩展ACL的父目录中创建私有输出。
+输入与密钥路径的父级链接也会拒绝；macOS临时路径请使用实际目录（如`/private/tmp`）。
+
+[跨平台方案](../../docs/private-pack-cross-platform-plan.md) ·
+[增量验收记录](../../docs/private-pack-cross-platform-validation.md) ·
+[原生与互操作CI](../../.github/workflows/private-pack.yml)

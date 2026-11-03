@@ -1,60 +1,54 @@
 from __future__ import annotations
 
-import ctypes
-import os
+import secrets
+import shutil
 import stat
 import sys
 from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from private_pack.manifest import KEY_SIZE, PackError
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Generator
-    from io import BufferedReader
+    from pathlib import Path
+
+if sys.platform == "win32":
+    from private_pack.storage_windows import (
+        commit_directory,
+        make_private_directory,
+        open_source,
+        write_private,
+    )
+else:
+    from private_pack.storage_posix import make_private_directory, open_source, write_private
+
+    if sys.platform == "darwin":
+        from private_pack.storage_macos import commit_directory
+    else:
+        from private_pack.storage_linux import commit_directory
+
+__all__ = [
+    "check_capabilities",
+    "commit_directory",
+    "is_link",
+    "make_private_directory",
+    "open_source",
+    "private_temp_directory",
+    "read_key",
+    "write_private",
+]
 
 
-def require_linux() -> None:
-    if sys.platform != "linux":
-        msg = "Packing currently requires Linux with renameat2 support."
-        raise PackError(msg)
-
-
-def commit_directory(source: Path, target: Path) -> None:
-    require_linux()
-    libc = ctypes.CDLL(None, use_errno=True)
-    try:
-        rename = libc.renameat2
-    except AttributeError as exc:
-        msg = "This system does not provide renameat2; output was not committed."
-        raise PackError(msg) from exc
-    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    rename.restype = ctypes.c_int
-    # AT_FDCWD=-100; RENAME_NOREPLACE=1. Never fall back to an overwriting rename.
-    if rename(-100, os.fsencode(source), -100, os.fsencode(target), 1) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error))
-
-
-def write_private(path: Path, data: bytes) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
+def is_link(info: os.stat_result) -> bool:
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
 
 
 def read_key(path: Path) -> bytes:
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-    with os.fdopen(fd, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            msg = "Key must be a regular file."
-            raise PackError(msg)
+    with open_source(path.absolute().parent, path.name) as stream:
         key = stream.read(KEY_SIZE + 1)
     if len(key) != KEY_SIZE:
         msg = "Key file must contain exactly 32 bytes."
@@ -63,20 +57,33 @@ def read_key(path: Path) -> bytes:
 
 
 @contextmanager
-def open_source(root: Path, relative: str) -> Generator[BufferedReader]:
-    """Walk every component without following links, including the input root."""
-    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+def private_temp_directory(parent: Path, prefix: str = ".private-pack-") -> Generator[Path]:
+    path = parent / (prefix + secrets.token_hex(16))
+    make_private_directory(path)
     try:
-        parts = Path(relative).parts
-        for part in parts[:-1]:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-            os.close(directory)
-            directory = child
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=directory)
-        with os.fdopen(fd, "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                msg = "Source file type changed during packing."
-                raise PackError(msg)
-            yield stream
+        yield path
     finally:
-        os.close(directory)
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            msg = f"Could not remove private temporary directory: {path}"
+            raise PackError(msg) from exc
+
+
+def check_capabilities(parent: Path) -> None:
+    if sys.platform not in {"linux", "darwin", "win32"}:
+        msg = "Supported platforms are Linux, macOS and Windows."
+        raise PackError(msg)
+    with private_temp_directory(parent) as probe:
+        source, target = probe / "source", probe / "target"
+        make_private_directory(source)
+        make_private_directory(target)
+        try:
+            commit_directory(source, target)
+        except FileExistsError:
+            pass
+        else:
+            msg = "Filesystem does not support exclusive directory publication."
+            raise PackError(msg)
+        target.rmdir()
+        commit_directory(source, target)
