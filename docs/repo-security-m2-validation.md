@@ -2,11 +2,11 @@
 
 日期：2026-11-17（Asia/Shanghai）。关联：[方案](repo-security-plan.md)、[M1 记录](repo-security-m1-validation.md)。
 
-结论：M2 在 Linux x64 完成本机验收，改动未提交。完整首版仍欠 M3 平台与聚合隔离安装验收。
+结论：M2 在 Linux x64 完成本机验收，实现已提交为 `fd0e2015c71bd0d93f502a5bc056d0655dc73c44`。M3 随后完成用户确认的 Linux 范围收尾，见 [M3 验收](repo-security-m3-validation.md)。本记录保留 M2 当时的产物与覆盖边界。
 
 ## 基线与产物
 
-- 源码基线：`b22881ea87bfe6eea320488d279f6b10004cc391`加当前未提交的 M2 包、测试、README、NOTICE、资源清单、版本与锁文件改动。实现提交：未提交。
+- 源码基线：`b22881ea87bfe6eea320488d279f6b10004cc391`加当前未提交的 M2 包、测试、README、NOTICE、资源清单、版本与锁文件改动。当时尚未提交；现对应实现提交 `fd0e2015c71bd0d93f502a5bc056d0655dc73c44`。运行时已核对一致；M3 支持说明等 metadata 更新后使用另一最终 wheel，不混淆两轮产物摘要。
 - 版本：CLI/模板 `0.2.0`；扫描器仍为 Gitleaks `8.30.1`、Semgrep `1.185.0`、Presidio Analyzer `2.2.366`。
 - 环境：Linux x86_64，uv `0.11.28`，CLI Python `3.11.15`，扫描器 Python `3.13.7`。独立 clone 安装器由系统 `python3` 引导，再由 uv 选择扫描器 Python。
 - wheel：`dist/repo_security-0.2.0-py3-none-any.whl`。

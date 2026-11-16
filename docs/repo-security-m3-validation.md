@@ -2,13 +2,13 @@
 
 日期：2026-11-17（Asia/Shanghai）。关联：[方案](repo-security-plan.md)、[M2 验收](repo-security-m2-validation.md)。
 
-结论：Linux x64 的单包与聚合 wheel、CLI Python 3.11/3.14 四种组合均通过真实验收。
+结论：Linux x64 的单包与聚合 wheel、CLI Python 3.11/3.14 四种组合均通过真实验收，实现提交和证据已对账，本轮已完成。
 用户明确要求“没有 mac，先跳过吧，先支持 linux 验收”，因此本轮以 Linux 为完成边界；
 macOS、其他架构及原生 Windows 均不计为通过，也不再阻塞本轮完成。
 
 ## 基线与完成范围
 
-- 实现 commit：提交对账中。验收基线为 `b22881ea87bfe6eea320488d279f6b10004cc391` 加 M2/M3 工作区改动。
+- 实现 commit：`fd0e2015c71bd0d93f502a5bc056d0655dc73c44`。验收时基线为 `b22881ea87bfe6eea320488d279f6b10004cc391` 加 M2/M3 工作区改动；提交后已核对与对应实现文件一致。
 - repo-security 运行时、规则及锁文件与 M2 已测 wheel 逐文件一致；M3 修改的是支持说明、验收脚本和文档，不新增扫描器依赖。
 - M2 的 51 项包内测试结果沿用已核对的运行时代码基线；本轮新增的是独立 wheel 原生验收，未执行其他 CLI 的业务测试。
 - 完成项：聚合注册、最终使用说明、两种 Python 下的单包/聚合独立安装、真实 hooks、文件资源校验、提交与证据对账。
