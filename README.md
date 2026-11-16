@@ -14,7 +14,7 @@ packages/
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
   private-pack/        Encrypted per-item 7z archives with a protected manifest
-  repo-security/       Repository-local scanners and Git hooks (M1 preview)
+  repo-security/       Repository-local scanners, setup recovery and Git hooks
   codex-hook-ctl/      Record and inject custom Codex hooks by name
   workspacectl/         Controller for requirement and collaboration Git worktrees
   my-py-utils-cli/      Aggregate installer for all workspace CLI commands

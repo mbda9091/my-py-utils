@@ -2,22 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from repo_security.errors import RepoSecurityError
+from repo_security.templates.manage import TemplateFile
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@dataclass(frozen=True)
-class TemplateFile:
-    destination: str
-    content: bytes
-    executable: bool
 
 
 def template_files(*, github_actions: bool = False) -> tuple[TemplateFile, ...]:

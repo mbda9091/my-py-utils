@@ -1,59 +1,122 @@
 # repo-security
 
-Repository-local Gitleaks, Semgrep and Presidio scanners, installed with uv.
-This is the **M1 preview**: first installation into a fresh `.security/` and
-manual Git snapshot scanning are available. Repeat installation, `--dry-run`,
-`doctor`, recovery manifests and optional CI generation are planned for M2.
+Install repository-local Gitleaks, Semgrep and Presidio scanners with uv.
+The CLI provides setup, read-only planning, repeat installation, recovery,
+diagnostics, manual scanning and optional GitHub Actions. This release is
+validated on **Linux x64** (Ubuntu 22.04.5 userland, glibc 2.35, WSL2 Linux
+kernel in the acceptance environment). macOS, Linux arm64 and native Windows
+have not been accepted for this release; macOS verification was explicitly deferred.
+Retained download checksums for other platforms are not evidence of support.
 
-From this workspace, install with `uv sync --all-groups --all-packages`, then:
+From this workspace, use `uv sync --all-groups --all-packages`, then:
 
 ```bash
+uv run --package repo-security repo-security setup /path/to/repo --dry-run
 uv run --package repo-security repo-security setup /path/to/repo
+uv run --package repo-security repo-security setup /path/to/repo --github-actions
+uv run --package repo-security repo-security doctor /path/to/repo
 uv run --package repo-security repo-security scan /path/to/repo --mode staged
 uv run --package repo-security repo-security scan /path/to/repo --mode history
 ```
 
-Setup writes `.security/`, appends only necessary entries to `.gitignore`,
-downloads pinned scanners, and uses a separate uv-managed Python 3.13 environment.
-It verifies a clean sample and synthetic findings from all three scanners before
-enabling repository-local pre-commit/pre-push hooks. It does not stage files,
-fetch, scan business history automatically, or modify global Git configuration.
-Review generated scripts and rules before committing them.
+Setup accepts a repository root or a directory inside it. It writes `.security/`,
+merges only necessary `.gitignore` entries, installs locked scanners in a separate
+uv-managed Python 3.13 environment, and enables repository-local pre-commit and
+pre-push hooks after real synthetic sample checks pass. First installation needs
+Git, uv and network access. Downloads may also populate uv's shared Python and
+package caches. Business dependencies, the index, global Git configuration and
+remote settings are not changed; setup does not fetch or scan history.
 
-M1 refuses existing `.security/`, existing hooks, bare repositories, linked
-worktrees and submodule checkouts. Installation failure can leave generated
-files and a partial environment; it does not enable new hooks. Inspect these
-before manually retrying the generated standalone installer. Full recovery is
-scheduled for M2. Setup requires Git, uv, network access and Linux/macOS x64 or
-arm64; **only Linux x64 has been exercised in M1**. Other platforms are untested.
-Use WSL on Windows; native Windows is unsupported.
+`--dry-run` reports additions, unchanged files, executable repairs, all detected
+conflicts, Git settings and potential downloads. It makes no writes, creates no
+locks or environments, executes no target scripts, and performs no downloads.
+Conflicts return 2, including in preview mode. Existing hook managers are not
+rewritten or chained automatically; the error identifies the configuration
+source and commands to integrate manually.
 
-The generated repository also works without this CLI:
+Same-version setup recognizes unchanged resources with or without an installation
+manifest, preserves their modification times and unrelated files, and reuses
+verified dependencies. Custom rules and different-version templates are reported
+as conflicts without replacement. There is no force, upgrade or uninstall option.
+**M1 installations are not automatically upgraded to 0.2.0**: review the diff and
+migrate intentionally, or install into a fresh repository.
+
+The ignored, machine-local `.security/install-manifest.json` records release and
+installed file hashes, original local hooks settings, verified Gitleaks archive
+and executable digests, and the last installation phase. Missing or damaged tools
+can be repaired by rerunning the same setup. On failure it records incomplete
+state and preserves generated files for retry, while removing normal temporary
+files and releasing the lock. New hooks are not left enabled after an ordinary
+failed first installation; existing protection is kept on failed repair.
+Concurrent external hook changes are preserved. No full filesystem or cache
+rollback is promised. If a killed process leaves `.git/repo-security-setup.lock`,
+confirm no setup is running before removing that lock manually.
+
+`doctor` reports incomplete state, missing or customized files, permissions,
+hooks, Gitleaks provenance, real tool versions, rule validity and synthetic
+sample detection. It does not install or repair anything, and skips untrusted
+modified runtime scripts/binaries. Checks use private temporary samples, not
+business code; Python bytecode writes are disabled. Custom rule differences are
+visible and do not alone make a valid configuration unhealthy. A healthy doctor
+result does not mean the repository's business code is safe.
+
+`--github-actions` creates `.github/workflows/repo-security.yml` only when explicitly
+requested. Existing unrelated workflows are preserved; different same-name content
+is a conflict. An already managed workflow remains managed on later setup calls
+without the flag. Actions are pinned to verified commit SHAs, checkout permissions
+are read-only, credentials are not persisted, and the full local reachable history
+is scanned. Generating YAML does not enable branch protection or GitHub Push
+Protection, and is not evidence of a successful remote CI run.
+
+After cloning reviewed `.security` files, the independent entry points also work:
 
 ```bash
-# After cloning a repository containing the reviewed .security files:
 python3 .security/setup.py --install-hooks
 .security/run staged
 .security/run head
 .security/run history
 ```
 
+The standalone installer uses the same stdlib installation engine as the CLI.
+A clone without the local manifest adopts its reviewed on-disk files as its
+snapshot; it never replaces source files or downloads template updates. The CLI
+compares against its bundled release defaults, so custom snapshots remain visible
+as differences. Standalone setup without `--install-hooks` verifies tools and
+leaves Git settings unchanged (used by CI). Do not commit the installation manifest,
+virtual environment or binaries.
+
 `scan` defaults to `staged`; `head` scans HEAD, and `history` scans locally
-reachable history without fetching. Findings return 1; environment/configuration
-errors return 2; either blocks hooks. Outputs show paths, locations and types,
-never the matched values. A full history scan can be expensive, particularly on
-first push of a new ref. Hooks can be bypassed; a pass is not a complete audit.
+reachable commits without fetching. Shallow repositories show an explicit coverage
+warning. Findings return 1; argument/environment/configuration errors return 2;
+either blocks hooks. Doctor returns 1 for an unhealthy installation and 2 for
+execution errors. Paths, lines and finding types are reported, not matched values.
+Pre-push covers intermediate commits, multiple refs and new-ref ancestors; ref
+deletions introduce no snapshots. Full history checks can be expensive. Hooks can
+be bypassed; a pass is not a complete audit.
 
-Rules are deliberately limited: Semgrep covers starter Python/JS/TS patterns;
-Presidio uses offline patterns without NLP downloads. Binary/unsupported text
-encodings produce PII coverage warnings; submodules and files over 5 MiB block.
-External scanners time out after 60 seconds per snapshot. Review precise rule
-exceptions yourself; the tool does not add allowlists automatically.
+Rules remain limited starter Python/JS/TS patterns and offline PII recognizers,
+without NLP model downloads or cloud rules. Binary/unsupported text encodings
+produce PII coverage warnings; submodules and files over 5 MiB block. External
+scanners time out after 60 seconds per snapshot. Review precise rule exceptions
+yourself; setup does not add allowlists automatically. Bare repositories, linked
+worktrees and submodule checkouts are unsupported. Native Windows is unsupported;
+The observed WSL2 Linux environment does not establish native Windows or
+Windows-mounted filesystem support.
 
-The packaged `templates/manifest.json` records original source hashes and shipped
-resource hashes separately. Template inputs use `.template` suffixes because
-they are deployed into an independent scanner environment, not imported into
-the CLI environment. Their syntax and behavior are checked by template compilation
-and real scanner integration tests. No scanner binaries, virtual environments,
-or caches are shipped. See [NOTICE](NOTICE.md) for provenance and distribution
-boundaries, and [the plan](../../docs/repo-security-plan.md) for the full scope.
+The package has no scanner runtime dependencies. `templates/manifest.json` records
+original source hashes and shipped resource hashes. Scanner inputs use `.template`
+suffixes and are compiled and exercised in their separate environment; the shared
+`templates/manage.py` engine is regular typed Python checked by Ruff/Pyright and
+copied with an explicit hash. No binaries, virtual environments or caches ship in
+wheels. See [NOTICE](NOTICE.md), [the plan](../../docs/repo-security-plan.md) and
+[M2 validation](../../docs/repo-security-m2-validation.md) and
+[Linux release acceptance](../../docs/repo-security-m3-validation.md).
+
+To repeat release acceptance, build fresh workspace wheels, export runtime
+constraints from the frozen root lockfile, and run
+`tests/repo_security_acceptance.py` with its `--dist`, `--constraints`, `--output`
+and `--python` arguments. The script installs single and aggregate wheels into
+separate environments outside the checkout, loads all aggregate entry points,
+executes only their help commands, and exercises repo-security with real local
+Git commit/push hooks. It creates disposable synthetic findings; do not publish
+its fixture repositories. Commands and artifact hashes are in the acceptance report.

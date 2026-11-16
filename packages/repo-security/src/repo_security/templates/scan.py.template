@@ -189,6 +189,8 @@ def main():
     parser.add_argument("mode", choices=["staged", "head", "history", "pre-push"])
     args = parser.parse_args()
     root = Path(git(SECURITY, "rev-parse", "--show-toplevel").decode().strip())
+    if git(root, "rev-parse", "--is-shallow-repository").decode().strip() == "true":
+        print("COVERAGE WARNING: shallow clone; local objects do not cover complete remote history.", file=sys.stderr)
     policy = json.loads((SECURITY / "policy.json").read_text())
     from pii import make_recognizers
     recognizers = make_recognizers(policy)
@@ -217,6 +219,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (RuntimeError, OSError, ValueError, ImportError) as error:
+    except (RuntimeError, OSError, ValueError, ImportError, KeyError, TypeError, AttributeError) as error:
         print(f"BLOCKED: {error}", file=sys.stderr)
         sys.exit(2)

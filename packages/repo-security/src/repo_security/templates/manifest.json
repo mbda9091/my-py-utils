@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "template_version": "0.1.0",
+  "template_version": "0.2.0",
   "source": "<normal-workspace>/code-security-template",
   "imported_on": "2026-11-17",
   "source_license": "No license file supplied; user-directed migration for this personal repository. No public redistribution license inferred.",
@@ -10,7 +10,7 @@
       "source_sha256": "a57846f9af8a701ddc7da2bf3d192992f97a6a6453acddcccfbfa13aa655b2d7",
       "resource": "setup.py.template",
       "destination": ".security/setup.py",
-      "sha256": "f8d9a1be2e87745d6b1f3a6c4a4c3377656c77880f980169d184ce339765b31e",
+      "sha256": "e938fe43ee86e790127d5a8d18d63f5edb80c35aab7276c818e8cc84feed5296",
       "executable": false
     },
     {
@@ -18,7 +18,7 @@
       "source_sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
       "resource": "scan.py.template",
       "destination": ".security/scan.py",
-      "sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
+      "sha256": "c9952b2fae33f00bc7161d2e0786120a0a9c96b3b8629d944c1a154685c0e220",
       "executable": false
     },
     {
@@ -98,7 +98,7 @@
       "source_sha256": "77f7d84aea6828870eeebd2288a65eb6838ba41e43f28f7afeba3df386103cb7",
       "resource": "github-security.yml.template",
       "destination": ".github/workflows/repo-security.yml",
-      "sha256": "77f7d84aea6828870eeebd2288a65eb6838ba41e43f28f7afeba3df386103cb7",
+      "sha256": "e5bcf122719d085f8cfcd8a4b5961021a74752d4c6e6c120d252651b93d1573a",
       "executable": false
     },
     {
@@ -107,6 +107,14 @@
       "resource": "selftest.py.template",
       "destination": ".security/selftest.py",
       "sha256": "5898fc4d230d9d051c80924080d4f34a3d325d10bd1f48923fe8a14df111aa13",
+      "executable": false
+    },
+    {
+      "source": null,
+      "source_sha256": null,
+      "resource": "manage.py",
+      "destination": ".security/manage.py",
+      "sha256": "2641a873465538a3fe73027f676e45b0a5728749c4988707518a9104f52dac23",
       "executable": false
     }
   ]

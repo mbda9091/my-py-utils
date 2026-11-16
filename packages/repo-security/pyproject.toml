@@ -1,6 +1,6 @@
 [project]
 name = "repo-security"
-version = "0.1.0"
+version = "0.2.0"
 description = "Install repository-local code security scanners and Git hooks."
 readme = "README.md"
 requires-python = ">=3.11"

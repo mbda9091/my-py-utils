@@ -15,6 +15,7 @@ packages/
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
   skill-sync/           Git-backed personal skill registry sync CLI
+  repo-security/        Repository-local scanners, Git hooks, and installation diagnostics
 tests/                  Package-scoped tests stored centrally
 ```
 
@@ -29,7 +30,7 @@ Do not manually activate `.venv`. Prefer:
 
 ```bash
 uv sync --all-groups --all-packages
-uv run pytest tests/test_repo_security.py
+uv run pytest tests/test_repo_security*.py
 uv run ruff check .
 uv run ruff format .
 uv run pyright
@@ -144,7 +145,7 @@ console-script registration, not their business behavior.
 Select validation based on the actual change:
 
 - For a package-local change, run that package's test files only. For example,
-  use `uv run pytest tests/test_repo_security.py` or
+  use `uv run pytest tests/test_repo_security*.py` or
   `uv run pytest tests/test_skill_sync_*.py`.
 - For shared helper changes, run the helper tests and the tests of affected
   consumers, including indirect consumers where behavior can change. Do not

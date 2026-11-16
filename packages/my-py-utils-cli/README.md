@@ -1,6 +1,9 @@
 # my-py-utils-cli
 
-Aggregate installer for all CLI commands in this workspace.
+Aggregate installer for all CLI commands in this workspace. Each command keeps
+its own package implementation; the aggregate package registers their console
+entry points. For repo-security setup and supported environments, see
+[its README](../repo-security/README.md).
 
 Install once:
 

@@ -9,10 +9,11 @@ from pathlib import Path
 
 import pytest
 from repo_security import resources
-from repo_security.core import repository_root, setup_repository
+from repo_security.core import setup_repository
 from repo_security.errors import RepoSecurityError
 from repo_security.main import main
 from repo_security.resources import template_files, write_template
+from repo_security.templates.manage import repository_root
 
 ERROR_EXIT = 2
 
@@ -114,6 +115,7 @@ def test_setup_conflicts_do_not_write(
     ignore.write_text("existing\n")
     if kind == "existing":
         security.mkdir()
+        (security / "policy.json").write_text("custom\n")
     elif kind == "symlink":
         security.symlink_to(tmp_path / "missing", target_is_directory=True)
     elif kind == "ignore-symlink":
