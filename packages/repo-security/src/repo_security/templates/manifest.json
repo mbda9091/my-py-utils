@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "template_version": "0.1.0",
+  "source": "<normal-workspace>/code-security-template",
+  "imported_on": "2026-11-17",
+  "source_license": "No license file supplied; user-directed migration for this personal repository. No public redistribution license inferred.",
+  "files": [
+    {
+      "source": ".security/setup.py",
+      "source_sha256": "a57846f9af8a701ddc7da2bf3d192992f97a6a6453acddcccfbfa13aa655b2d7",
+      "resource": "setup.py.template",
+      "destination": ".security/setup.py",
+      "sha256": "f8d9a1be2e87745d6b1f3a6c4a4c3377656c77880f980169d184ce339765b31e",
+      "executable": false
+    },
+    {
+      "source": ".security/scan.py",
+      "source_sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
+      "resource": "scan.py.template",
+      "destination": ".security/scan.py",
+      "sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
+      "executable": false
+    },
+    {
+      "source": ".security/pii.py",
+      "source_sha256": "650fe54688dd8d69ee279b56a3f8f5570458f3e3a69609d0f2260849b49d72d9",
+      "resource": "pii.py.template",
+      "destination": ".security/pii.py",
+      "sha256": "650fe54688dd8d69ee279b56a3f8f5570458f3e3a69609d0f2260849b49d72d9",
+      "executable": false
+    },
+    {
+      "source": ".security/run",
+      "source_sha256": "a2ee0698adde6f2ca39ddcaf72c8a807a2a93039ab2ccbbad6efc6564f609bf0",
+      "resource": "run.template",
+      "destination": ".security/run",
+      "sha256": "a2ee0698adde6f2ca39ddcaf72c8a807a2a93039ab2ccbbad6efc6564f609bf0",
+      "executable": true
+    },
+    {
+      "source": ".security/pyproject.toml",
+      "source_sha256": "b5c1f7f5a4dcea34e08f076b11cb29d52ace0eac9b36f3388e88b8b015c2f5e7",
+      "resource": "pyproject.toml.template",
+      "destination": ".security/pyproject.toml",
+      "sha256": "28edf17364b6a491982bcb5feab433bca7964ce02ce22f6f00f1030ea09df658",
+      "executable": false
+    },
+    {
+      "source": ".security/uv.lock",
+      "source_sha256": "eda8c15634394ed7cc87e72c57993ba379e1069937411906b39204da88237ff4",
+      "resource": "uv.lock.template",
+      "destination": ".security/uv.lock",
+      "sha256": "eda8c15634394ed7cc87e72c57993ba379e1069937411906b39204da88237ff4",
+      "executable": false
+    },
+    {
+      "source": ".security/gitleaks.toml",
+      "source_sha256": "387aaf2d9f33d4cd6a1037c66c23f93e9c814f036f1f1f68889faac5c99b2c5b",
+      "resource": "gitleaks.toml.template",
+      "destination": ".security/gitleaks.toml",
+      "sha256": "387aaf2d9f33d4cd6a1037c66c23f93e9c814f036f1f1f68889faac5c99b2c5b",
+      "executable": false
+    },
+    {
+      "source": ".security/semgrep.yml",
+      "source_sha256": "53937a55f21c0745d2ffa7aaff7c02d1d6a6221bfcdc972532ef4337502edbf4",
+      "resource": "semgrep.yml.template",
+      "destination": ".security/semgrep.yml",
+      "sha256": "53937a55f21c0745d2ffa7aaff7c02d1d6a6221bfcdc972532ef4337502edbf4",
+      "executable": false
+    },
+    {
+      "source": ".security/policy.json",
+      "source_sha256": "ace8c0d1da180e81e388bcad23fccf2275edada4c963315d2212236a8b308601",
+      "resource": "policy.json.template",
+      "destination": ".security/policy.json",
+      "sha256": "ace8c0d1da180e81e388bcad23fccf2275edada4c963315d2212236a8b308601",
+      "executable": false
+    },
+    {
+      "source": ".security/hooks/pre-commit",
+      "source_sha256": "3bcd98004cf274f1dda23b1803b2761b834ebccea810dacedfa9205354cd48b6",
+      "resource": "hooks/pre-commit.template",
+      "destination": ".security/hooks/pre-commit",
+      "sha256": "3bcd98004cf274f1dda23b1803b2761b834ebccea810dacedfa9205354cd48b6",
+      "executable": true
+    },
+    {
+      "source": ".security/hooks/pre-push",
+      "source_sha256": "794c853e72ee45d2961c90e175db1c9d69b06b84cd07744a05ba296d9aa3c6bc",
+      "resource": "hooks/pre-push.template",
+      "destination": ".security/hooks/pre-push",
+      "sha256": "794c853e72ee45d2961c90e175db1c9d69b06b84cd07744a05ba296d9aa3c6bc",
+      "executable": true
+    },
+    {
+      "source": ".github/workflows/security.yml",
+      "source_sha256": "77f7d84aea6828870eeebd2288a65eb6838ba41e43f28f7afeba3df386103cb7",
+      "resource": "github-security.yml.template",
+      "destination": ".github/workflows/repo-security.yml",
+      "sha256": "77f7d84aea6828870eeebd2288a65eb6838ba41e43f28f7afeba3df386103cb7",
+      "executable": false
+    },
+    {
+      "source": null,
+      "source_sha256": null,
+      "resource": "selftest.py.template",
+      "destination": ".security/selftest.py",
+      "sha256": "5898fc4d230d9d051c80924080d4f34a3d325d10bd1f48923fe8a14df111aa13",
+      "executable": false
+    }
+  ]
+}

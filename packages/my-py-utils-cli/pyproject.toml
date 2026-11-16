@@ -10,6 +10,7 @@ dependencies = [
     "mac-cache-cleaner",
     "node-modules-cleaner",
     "private-pack",
+    "repo-security",
     "skill-sync",
     "video2audio",
     "workspacectl",
@@ -24,6 +25,7 @@ node-modules-cleaner = "node_modules_cleaner:main"
 skill-sync = "skill_sync.cli:main"
 video2audio = "video2audio:main"
 workspacectl = "workspacectl.cli:main"
+repo-security = "repo_security.main:main"
 
 [tool.uv.sources]
 hello-cli = { workspace = true }
@@ -34,6 +36,7 @@ video2audio = { workspace = true }
 workspacectl = { workspace = true }
 codex-hook-ctl = { workspace = true }
 private-pack = { workspace = true }
+repo-security = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]

@@ -1,0 +1,2 @@
+class RepoSecurityError(Exception):
+    pass

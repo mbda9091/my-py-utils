@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Install pinned local scanners; enable hooks only after verification."""
+
+import argparse
+import hashlib
+import io
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+
+VERSION = "8.30.1"
+CHECKSUMS = {
+    ("Linux", "x86_64"): "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+    ("Linux", "aarch64"): "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",
+    ("Darwin", "x86_64"): "dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709",
+    ("Darwin", "arm64"): "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+}
+HOOKS = {
+    "pre-commit": '#!/bin/sh\nset -eu\nrepo_root=$(git rev-parse --show-toplevel)\nexec "$repo_root/.security/run" staged\n',
+    "pre-push": '#!/bin/sh\nset -eu\nrepo_root=$(git rev-parse --show-toplevel)\nexec "$repo_root/.security/run" pre-push\n',
+}
+
+
+def git(root, *args):
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+
+def check_hooks(root):
+    found = git(root, "rev-parse", "--show-toplevel")
+    if found.returncode or Path(found.stdout.strip()).resolve() != root.resolve():
+        raise RuntimeError("Expected the root of a non-bare Git repository")
+    if not (root / ".git").is_dir() or (root / ".git").is_symlink():
+        raise RuntimeError("Linked worktrees and submodule checkouts are not supported")
+    configured = git(root, "config", "--get", "core.hooksPath")
+    local = git(root, "config", "--local", "--get", "core.hooksPath")
+    if configured.returncode not in (0, 1) or local.returncode not in (0, 1):
+        raise RuntimeError("Cannot inspect Git hooks configuration")
+    if configured.returncode == 0:
+        if configured.stdout.strip() != ".security/hooks" or local.stdout != configured.stdout:
+            raise RuntimeError("Existing core.hooksPath conflicts; merge .security/run staged and pre-push manually")
+        directory = root / ".security/hooks"
+        for name, expected in HOOKS.items():
+            path = directory / name
+            if path.is_symlink() or not path.is_file() or path.read_text() != expected:
+                raise RuntimeError("Existing security hooks differ; no setting changed")
+    else:
+        for name in HOOKS:
+            result = git(root, "rev-parse", "--git-path", "hooks/" + name)
+            if result.returncode:
+                raise RuntimeError("Cannot locate existing Git hooks")
+            path = Path(result.stdout.strip())
+            if not path.is_absolute():
+                path = root / path
+            if path.exists() or path.is_symlink():
+                raise RuntimeError("Existing Git hook conflicts; merge .security/run staged and pre-push manually")
+
+
+def install_gitleaks(security):
+    key = (platform.system(), platform.machine())
+    if key not in CHECKSUMS:
+        raise RuntimeError("Supported: Linux/macOS x64/arm64; use WSL on Windows")
+    system = platform.system().lower()
+    arch = "x64" if platform.machine() == "x86_64" else "arm64"
+    asset = f"gitleaks_{VERSION}_{system}_{arch}.tar.gz"
+    url = f"https://github.com/gitleaks/gitleaks/releases/download/v{VERSION}/{asset}"
+    # Always revalidate the release archive. Never trust a pre-existing executable.
+    with urllib.request.urlopen(url, timeout=120) as response:
+        payload = response.read()
+    if hashlib.sha256(payload).hexdigest() != CHECKSUMS[key]:
+        raise RuntimeError("Gitleaks checksum mismatch; installation blocked")
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+        member = archive.getmember("gitleaks")
+        if not member.isfile():
+            raise RuntimeError("Unexpected Gitleaks archive member")
+        stream = archive.extractfile(member)
+        if stream is None:
+            raise RuntimeError("Missing Gitleaks executable")
+        content = stream.read()
+        notices = {}
+        for name in ("LICENSE", "LICENSE.txt", "NOTICE", "NOTICE.txt"):
+            try:
+                notice = archive.getmember(name)
+            except KeyError:
+                continue
+            if notice.isfile():
+                stream = archive.extractfile(notice)
+                if stream is not None:
+                    notices[name] = stream.read()
+    directory = security / "bin"
+    if directory.is_symlink():
+        raise RuntimeError("Scanner binary directory must not be a symlink")
+    directory.mkdir(exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix=".gitleaks-", dir=directory)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+        temporary.chmod(0o755)
+        temporary.replace(directory / "gitleaks")
+        for name, data in notices.items():
+            target = directory / ("GITLEAKS-" + name)
+            if target.is_symlink():
+                raise RuntimeError("Gitleaks notices must not be symlinks")
+            target.write_bytes(data)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def verify(security):
+    python = security / ".venv/bin/python"
+    command = (
+        "from importlib.metadata import version; "
+        "assert version('semgrep') == '1.185.0'; "
+        "assert version('presidio-analyzer') == '2.2.366'"
+    )
+    subprocess.run([str(python), "-c", command], cwd=security, check=True)
+    result = subprocess.run([str(security / "bin/gitleaks"), "version"], capture_output=True, text=True, check=True)
+    if result.stdout.strip().removeprefix("v") != VERSION:
+        raise RuntimeError("Unexpected Gitleaks version")
+    subprocess.run([str(python), str(security / "selftest.py")], cwd=security, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--install-hooks", action="store_true")
+    parser.add_argument("--check-hooks", type=Path, help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.check_hooks is not None:
+        check_hooks(args.check_hooks)
+        if (platform.system(), platform.machine()) not in CHECKSUMS:
+            raise RuntimeError("Supported: Linux/macOS x64/arm64; use WSL on Windows")
+        return 0
+    security = Path(__file__).resolve().parent
+    root = security.parent
+    if args.install_hooks:
+        check_hooks(root)  # Before network access or environment writes.
+    if (platform.system(), platform.machine()) not in CHECKSUMS:
+        raise RuntimeError("Supported: Linux/macOS x64/arm64; use WSL on Windows")
+    uv = shutil.which("uv")
+    if uv is None:
+        raise RuntimeError("Install uv before setting up scanners")
+    if (security / ".venv").is_symlink():
+        raise RuntimeError("Scanner environment must not be a symlink")
+    print("Installing locked scanners in .security with Python 3.13...", flush=True)
+    # A nested workspace boundary keeps the business project out of resolution.
+    # Ignore ambient environment destinations and user/parent uv configuration.
+    env = dict(os.environ)
+    for key in ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_WORKING_DIR", "UV_PROJECT", "UV_PYTHON"):
+        env.pop(key, None)
+    subprocess.run([uv, "sync", "--locked", "--no-config", "--python", "3.13", "--project", str(security)], env=env, check=True)
+    install_gitleaks(security)
+    for path in [security / "run", *(security / "hooks").iterdir()]:
+        if path.is_symlink():
+            raise RuntimeError("Security entry points must not be symlinks")
+        path.chmod(0o755)
+    verify(security)
+    if args.install_hooks:
+        check_hooks(root)  # Recheck after slow installation.
+        result = git(root, "config", "--local", "core.hooksPath", ".security/hooks")
+        if result.returncode:
+            raise RuntimeError("Cannot enable repository-local hooks")
+        result = git(root, "config", "--get", "core.hooksPath")
+        if result.returncode or result.stdout.strip() != ".security/hooks":
+            raise RuntimeError("Hooks configuration did not take effect")
+        print("Installed repository-local pre-commit and pre-push hooks.", flush=True)
+    print("Tools verified. Run .security/run staged, head, or history.", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, tarfile.TarError) as error:
+        print(f"Security installation failed: {error}", file=sys.stderr)
+        sys.exit(2)
