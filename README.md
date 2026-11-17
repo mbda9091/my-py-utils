@@ -44,7 +44,7 @@ uv run --package skill-sync skill-sync --help
 uv run --package workspacectl workspacectl --help
 uv run --package private-pack private-pack --help
 uv run --package repo-security repo-security --help
-uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email bozieg@qq.com
+uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email registry@example.com
 ```
 
 ## Initialize This Project

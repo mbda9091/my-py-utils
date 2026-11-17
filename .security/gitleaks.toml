@@ -4,3 +4,13 @@ title = "Project secret scanning"
 useDefault = true
 
 # Add project-specific rules below. Keep the built-in rules enabled.
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Public legacy archive password fixture; exact value and test file."
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^tests/test_private_pack_platform\.py$''']
+regexes = ['''^Aa0123456789abcdefgh$''']

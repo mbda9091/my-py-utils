@@ -18,7 +18,7 @@
       "source_sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
       "resource": "scan.py.template",
       "destination": ".security/scan.py",
-      "sha256": "c9952b2fae33f00bc7161d2e0786120a0a9c96b3b8629d944c1a154685c0e220",
+      "sha256": "ad4ca1202404b10633110e293f21fded7ec4184c6b16f8e352da3732994c13e5",
       "executable": false
     },
     {
@@ -26,7 +26,7 @@
       "source_sha256": "650fe54688dd8d69ee279b56a3f8f5570458f3e3a69609d0f2260849b49d72d9",
       "resource": "pii.py.template",
       "destination": ".security/pii.py",
-      "sha256": "650fe54688dd8d69ee279b56a3f8f5570458f3e3a69609d0f2260849b49d72d9",
+      "sha256": "5730714f4a93801c260d92ad394dc4b4dad636b810a0709736b326c4ea366945",
       "executable": false
     },
     {

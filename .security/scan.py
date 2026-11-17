@@ -129,7 +129,7 @@ def scan_snapshot(root, revision, policy, recognizers):
             if text is None:
                 skipped.append(path)
                 continue
-            for line, entity in detect(text, recognizers, policy):
+            for line, entity in detect(text, recognizers, policy, path=path):
                 print(f"  Presidio: {path}:{line} [{entity}]", flush=True)
                 findings += 1
         env = dict(os.environ)
@@ -140,12 +140,27 @@ def scan_snapshot(root, revision, policy, recognizers):
         env.pop("SEMGREP_APP_TOKEN", None)
         for key in ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"):
             env.pop(key, None)
-        report = scratch / "gitleaks.json"
-        findings += tool_findings([
-            str(gitleaks), "dir", str(snapshot), "--config", str(SECURITY / "gitleaks.toml"),
-            "--redact", "--ignore-gitleaks-allow", "--report-format", "json",
-            "--report-path", str(report), "--exit-code", "1", "--no-banner",
-        ], report, "Gitleaks", snapshot, env)
+        # Repository-controlled .gitleaksignore must not suppress snapshot findings.
+        ignore = scratch / "gitleaksignore"
+        ignore.write_text("")
+        source_ignore = snapshot / ".gitleaksignore"
+        ignore_content = source_ignore.read_bytes() if source_ignore.is_file() else None
+        targets = ["."]
+        if ignore_content is not None:
+            # Gitleaks also loads source/.gitleaksignore despite the explicit flag.
+            # Neutralize it for the directory scan, then scan its original bytes as a file.
+            source_ignore.write_bytes(b"")
+            targets.append(".gitleaksignore")
+        for index, target in enumerate(targets):
+            if target == ".gitleaksignore":
+                source_ignore.write_bytes(ignore_content)
+            report = scratch / f"gitleaks-{index}.json"
+            findings += tool_findings([
+                str(gitleaks), "dir", target, "--config", str(SECURITY / "gitleaks.toml"),
+                "--gitleaks-ignore-path", str(ignore),
+                "--redact", "--ignore-gitleaks-allow", "--report-format", "json",
+                "--report-path", str(report), "--exit-code", "1", "--no-banner",
+            ], report, "Gitleaks", snapshot, env)
         findings += tool_findings([
             str(semgrep), "scan", "--config", str(SECURITY / "semgrep.yml"),
             "--metrics=off", "--disable-version-check", "--strict", "--json", "--quiet",

@@ -105,6 +105,31 @@ worktrees and submodule checkouts are unsupported. Native Windows is unsupported
 The observed WSL2 Linux environment does not establish native Windows or
 Windows-mounted filesystem support.
 
+PII detection distinguishes numeric IDs in GitHub artifact URLs and the service
+account in GitHub SCP-style SSH remotes from ordinary phone/email text. Other
+hosts, query parameters and adjacent sensitive values remain covered.
+Project-specific `pii_allowlist` entries may include `paths`, a non-empty list of
+exact repository-relative file paths. The entity and full value regex must also
+match; omitting `paths` keeps the existing global behavior. Record the reviewed
+reason alongside each project exception. For example:
+
+```json
+{
+  "entity": "EMAIL_ADDRESS",
+  "regex": "maintainer@example[.]com",
+  "paths": ["pyproject.toml"],
+  "reason": "Published package author contact in package metadata."
+}
+```
+
+Keep repository-specific fixture exceptions out of the shipped defaults.
+This repository's Gitleaks exception combines the exact public fixture password
+and test path with `condition = "AND"`; other values in that file and the same
+value in other files are still checked. The syntax follows the
+[Gitleaks 8.30.1 configuration reference](https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md#configuration).
+Repository-controlled `.gitleaksignore` and inline `gitleaks:allow` directives
+cannot suppress findings; the ignore file's original content is still scanned.
+
 The package has no scanner runtime dependencies. `templates/manifest.json` records
 original source hashes and shipped resource hashes. Scanner inputs use `.template`
 suffixes and are compiled and exercised in their separate environment; the shared

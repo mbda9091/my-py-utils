@@ -7,6 +7,17 @@ import tldextract
 from presidio_analyzer import Pattern, PatternRecognizer
 from presidio_analyzer.predefined_recognizers import CreditCardRecognizer, EmailRecognizer
 
+GITHUB_ARTIFACT_ID = re.compile(
+    r"(?<![A-Za-z0-9_./?=&%:+-])https://github[.]com/"
+    r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/actions/"
+    r"(?:runs/[0-9]+/)?artifacts/(?P<id>[0-9]+)/?"
+    r"(?=$|[\s?#)>\]\"'\x60])"
+)
+GITHUB_SSH_USER = re.compile(
+    r"(?<![A-Za-z0-9_./?=&%:+-])(?P<user>git@github[.]com):"
+    r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?=$|[\s\"'\x60),}\]])"
+)
+
 
 class OfflineEmailRecognizer(EmailRecognizer):
     # The default EmailRecognizer may refresh the public suffix list over HTTP.
@@ -37,6 +48,13 @@ class ChineseIdentityRecognizer(PatternRecognizer):
 
 
 def make_recognizers(policy):
+    for item in policy["pii_allowlist"]:
+        if "paths" in item and (
+            not isinstance(item["paths"], list)
+            or not item["paths"]
+            or any(not isinstance(path, str) or not path for path in item["paths"])
+        ):
+            raise ValueError("PII allowlist paths must be a non-empty list of exact paths")
     recognizers = [
         OfflineEmailRecognizer(),
         CreditCardRecognizer(),
@@ -54,16 +72,26 @@ def make_recognizers(policy):
     return recognizers
 
 
-def detect(text, recognizers, policy):
+def detect(text, recognizers, policy, path=None):
     """Return locations and entity types only; never return the sensitive values."""
     found = set()
+    artifact_ids = {match.span("id") for match in GITHUB_ARTIFACT_ID.finditer(text)}
+    ssh_users = {match.span("user") for match in GITHUB_SSH_USER.finditer(text)}
     for recognizer in recognizers:
         for result in recognizer.analyze(text, recognizer.supported_entities):
             if result.score < 0.5:
                 continue
+            if (
+                result.entity_type == "CN_MOBILE_PHONE"
+                and (result.start, result.end) in artifact_ids
+            ):
+                continue
+            if result.entity_type == "EMAIL_ADDRESS" and (result.start, result.end) in ssh_users:
+                continue
             value = text[result.start:result.end]
             if any(
                 item["entity"] == result.entity_type
+                and ("paths" not in item or path in item["paths"])
                 and re.fullmatch(item["regex"], value)
                 for item in policy["pii_allowlist"]
             ):

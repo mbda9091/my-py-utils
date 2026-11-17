@@ -5,6 +5,12 @@
     {
       "entity": "EMAIL_ADDRESS",
       "regex": "(?i)[^@]+@(?:[a-z0-9-]+\\.)*(?:example\\.(?:com|org|net)|example|invalid|test)"
+    },
+    {
+      "entity": "EMAIL_ADDRESS",
+      "regex": "chengqiyun@kuaishou[.]com",
+      "paths": ["packages/video2audio/pyproject.toml"],
+      "reason": "Public package author contact; only this value in this metadata file."
     }
   ],
   "custom_patterns": []

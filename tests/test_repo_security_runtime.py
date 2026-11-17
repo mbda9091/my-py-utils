@@ -38,13 +38,14 @@ def test_real_push_covers_intermediate_commits_multiple_refs_and_deletions(
     git(root, "remote", "add", "test", str(remote))
     clean = commit(root, "print('safe')\n")
     git(root, "push", "test", "HEAD:refs/heads/main")
-    commit(root, 'phone = "13912345678"\n')
+    phone = "139" + "12345678"
+    commit(root, f'phone = "{phone}"\n')
     commit(root, "print('removed')\n")
     git(root, "tag", "-a", "v1", "-m", "Synthetic tag")
     result = git(root, "push", "test", "HEAD:refs/heads/main", "refs/tags/v1", check=False)
     assert result.returncode != 0
     assert "CN_MOBILE_PHONE" in result.stdout + result.stderr
-    assert "13912345678" not in result.stdout + result.stderr
+    assert phone not in result.stdout + result.stderr
     assert (
         git(root, "--git-dir", str(remote), "rev-parse", "refs/heads/main").stdout.strip() == clean
     )
@@ -73,6 +74,21 @@ def test_gitleaks_inline_allow_and_ignore_file_cannot_bypass(real_scanners: Path
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Gitleaks:" in result.stdout
+    assert secret not in result.stdout + result.stderr
+
+
+def test_gitleaksignore_content_is_still_scanned(real_scanners: Path) -> None:
+    secret = "ghp_" + "aB3dE5fG7hJ9kL2mN4pQ6rS8tU0vW1xY3zA5"
+    (real_scanners / ".gitleaksignore").write_text(f'token = "{secret}"\n')
+    git(real_scanners, "add", ".gitleaksignore")
+    result = subprocess.run(  # noqa: S603 -- original ignore-file bytes must remain covered
+        [str(real_scanners / ".security/run"), "staged"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Gitleaks: .gitleaksignore:" in result.stdout
     assert secret not in result.stdout + result.stderr
 
 

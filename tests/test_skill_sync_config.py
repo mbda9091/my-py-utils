@@ -38,13 +38,13 @@ def test_init_config_writes_git_identity(tmp_path: Path) -> None:
         "git@example.com:me/skills.git",
         branch="main",
         git_name="mbda9091",
-        git_email="bozieg@qq.com",
+        git_email="registry@example.com",
         state_home=tmp_path,
     )
 
-    assert config.git_identity == GitIdentity(name="mbda9091", email="bozieg@qq.com")
+    assert config.git_identity == GitIdentity(name="mbda9091", email="registry@example.com")
     payload = json.loads(config_path(tmp_path).read_text(encoding="utf-8"))
-    assert payload["gitIdentity"] == {"name": "mbda9091", "email": "bozieg@qq.com"}
+    assert payload["gitIdentity"] == {"name": "mbda9091", "email": "registry@example.com"}
     assert read_config(tmp_path).git_identity == config.git_identity
 
 
@@ -55,11 +55,11 @@ def test_init_config_updates_identity_for_existing_same_registry(tmp_path: Path)
         "git@example.com:me/skills.git",
         branch="main",
         git_name="mbda9091",
-        git_email="bozieg@qq.com",
+        git_email="registry@example.com",
         state_home=tmp_path,
     )
 
-    assert updated.git_identity == GitIdentity(name="mbda9091", email="bozieg@qq.com")
+    assert updated.git_identity == GitIdentity(name="mbda9091", email="registry@example.com")
     assert read_config(tmp_path).git_identity == updated.git_identity
 
 

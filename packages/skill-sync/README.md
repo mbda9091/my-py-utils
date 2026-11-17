@@ -10,7 +10,7 @@ them into the Codex user skill directory.
 ```bash
 skill-sync init git@github.com:you/agent-skills.git --branch main \
   --git-name mbda9091 \
-  --git-email bozieg@qq.com
+  --git-email registry@example.com
 skill-sync sync
 skill-sync status
 skill-sync validate ~/.agents/skills/foo
@@ -38,7 +38,7 @@ across machines:
 ```bash
 skill-sync init git@github.com:mbda9091/my-skills.git --branch main \
   --git-name mbda9091 \
-  --git-email bozieg@qq.com
+  --git-email registry@example.com
 ```
 
 The identity is saved in `~/.skill-sync/config.json`. `skill-sync sync` and

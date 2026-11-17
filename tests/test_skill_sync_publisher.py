@@ -33,7 +33,7 @@ def make_config(tmp_path: Path) -> Config:
         branch="main",
         checkout=checkout,
         state_home=tmp_path / "state",
-        git_identity=GitIdentity(name="mbda9091", email="bozieg@qq.com"),
+        git_identity=GitIdentity(name="mbda9091", email="registry@example.com"),
     )
 
 

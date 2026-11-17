@@ -21,7 +21,7 @@ def test_apply_git_identity_writes_local_git_config(
         branch="main",
         checkout=tmp_path / "repository",
         state_home=tmp_path / "state",
-        git_identity=GitIdentity(name="mbda9091", email="bozieg@qq.com"),
+        git_identity=GitIdentity(name="mbda9091", email="registry@example.com"),
     )
     run_git = Mock()
     monkeypatch.setattr("skill_sync.git_repo.run_git", run_git)
@@ -30,7 +30,7 @@ def test_apply_git_identity_writes_local_git_config(
 
     assert run_git.call_args_list == [
         ((["config", "user.name", "mbda9091"],), {"cwd": config.checkout}),
-        ((["config", "user.email", "bozieg@qq.com"],), {"cwd": config.checkout}),
+        ((["config", "user.email", "registry@example.com"],), {"cwd": config.checkout}),
     ]
 
 
@@ -43,7 +43,7 @@ def test_sync_repository_applies_identity_after_clone(
         branch="main",
         checkout=tmp_path / "repository",
         state_home=tmp_path / "state",
-        git_identity=GitIdentity(name="mbda9091", email="bozieg@qq.com"),
+        git_identity=GitIdentity(name="mbda9091", email="registry@example.com"),
     )
     run_git = Mock()
     monkeypatch.setattr("skill_sync.git_repo.run_git", run_git)
@@ -65,5 +65,5 @@ def test_sync_repository_applies_identity_after_clone(
             {"cwd": None},
         ),
         ((["config", "user.name", "mbda9091"],), {"cwd": config.checkout}),
-        ((["config", "user.email", "bozieg@qq.com"],), {"cwd": config.checkout}),
+        ((["config", "user.email", "registry@example.com"],), {"cwd": config.checkout}),
     ]

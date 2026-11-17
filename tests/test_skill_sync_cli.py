@@ -67,14 +67,14 @@ def test_cli_init_accepts_git_identity(
                 "--git-name",
                 "mbda9091",
                 "--git-email",
-                "bozieg@qq.com",
+                "registry@example.com",
             ],
         )
         == 0
     )
 
     init_output = capsys.readouterr()
-    assert "git identity: mbda9091 <bozieg@qq.com>" in init_output.out
+    assert "git identity: mbda9091 <registry@example.com>" in init_output.out
 
 
 def test_cli_validate_reports_metadata(
