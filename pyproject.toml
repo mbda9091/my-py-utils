@@ -22,6 +22,8 @@ members = ["packages/*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Generated scanner runtime; its source engine is checked under packages/repo-security.
+extend-exclude = [".security"]
 
 [tool.ruff.lint]
 select = ["ALL"]

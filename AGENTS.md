@@ -163,6 +163,10 @@ Select validation based on the actual change:
 Report the selected test scope and results. Distinguish real integration runs
 from mocked checks and skipped tests; a skip is not evidence of passing behavior.
 
+Save reports and logs intended for user review under the repository's `.tmp/`
+directory, which is Git-ignored. Internal scanner snapshots and raw reports may
+continue to use private, automatically cleaned temporary directories.
+
 When adding a new CLI package:
 
 - add tests for reusable logic
