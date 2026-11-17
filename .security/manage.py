@@ -47,6 +47,9 @@ if [ ! -f "$hook_dir/10-security" ] || [ ! -x "$hook_dir/10-security" ]; then
     exit 2
 fi
 for hook in "$hook_dir"/*; do
+    if [ "$hook" = "$hook_dir/10-security" ]; then
+        continue
+    fi
     if [ ! -e "$hook" ] && [ ! -L "$hook" ]; then
         continue
     fi
@@ -56,6 +59,7 @@ for hook in "$hook_dir"/*; do
     fi
     "$hook" "$@"
 done
+exec "$hook_dir/10-security" "$@"
 """
 IGNORE_ENTRIES = (
     "/.security/.venv/",
@@ -601,18 +605,52 @@ def install_gitleaks(security: Path, previous: dict[str, str]) -> dict[str, str]
     }
 
 
-def verify_runtime(security: Path) -> None:
+def verify_python_runtime(security: Path) -> None:
     python = security / ".venv/bin/python"
+    semgrep = security / ".venv/bin/semgrep"
+    for path in (python, semgrep):
+        if not path.is_file() or not os.access(path, os.X_OK):
+            msg = "Security Python or Semgrep entry point is missing or not executable"
+            raise RepoSecurityError(msg)
     command = "from importlib.metadata import version; " + "; ".join(
         f"assert version({name!r}) == {expected!r}" for name, expected in SCANNER_VERSIONS.items()
     )
+    command += "; import semgrep; from presidio_analyzer import Pattern, PatternRecognizer"
     env = uv_environment()
     run_tool([str(python), "-B", "-c", command], cwd=security, env=env)
+    with tempfile.TemporaryDirectory(prefix="repo-security-probe-") as directory:
+        env.update(
+            SEMGREP_SEND_METRICS="off",
+            SEMGREP_ENABLE_VERSION_CHECK="0",
+            SEMGREP_SETTINGS_FILE=str(Path(directory) / "settings.yml"),
+            SEMGREP_LOG_FILE=str(Path(directory) / "semgrep.log"),
+        )
+        env.pop("SEMGREP_APP_TOKEN", None)
+        actual = run_tool(
+            [str(semgrep), "--version", "--disable-version-check", "--metrics=off"],
+            cwd=security,
+            env=env,
+        )
+    if actual != SCANNER_VERSIONS["semgrep"]:
+        msg = "Unexpected Semgrep executable version"
+        raise RepoSecurityError(msg)
+
+
+def verify_scan_runtime(security: Path) -> None:
     version = run_tool([str(security / "bin/gitleaks"), "version"], cwd=security)
     if version.removeprefix("v") != GITLEAKS_VERSION:
         msg = "Unexpected Gitleaks version"
         raise RepoSecurityError(msg)
-    run_tool([str(python), "-B", str(security / "selftest.py")], cwd=security, env=env)
+    run_tool(
+        [str(security / ".venv/bin/python"), "-B", str(security / "selftest.py")],
+        cwd=security,
+        env=uv_environment(),
+    )
+
+
+def verify_runtime(security: Path) -> None:
+    verify_python_runtime(security)
+    verify_scan_runtime(security)
 
 
 def install_runtime(root: Path, record: InstallRecord) -> None:
@@ -636,11 +674,17 @@ def install_runtime(root: Path, record: InstallRecord) -> None:
         run_tool([*command, "--check"], cwd=security, env=env)
     except RepoSecurityError:
         run_tool(command, cwd=security, env=env, timeout=600)
+    try:
+        verify_python_runtime(security)
+    except (OSError, RepoSecurityError, subprocess.SubprocessError):
+        # Package metadata alone does not reveal missing launchers or damaged imports.
+        run_tool([*command, "--reinstall"], cwd=security, env=env, timeout=600)
+        verify_python_runtime(security)  # One bounded repair; persistent failures stay blocked.
     record["gitleaks"] = install_gitleaks(security, record["gitleaks"])
     prior = read_record(root)
     if not prior or prior["status"] != "ready" or prior["gitleaks"] != record["gitleaks"]:
         save_record(root, record)  # Preserve verified archive provenance on partial failure.
-    verify_runtime(security)
+    verify_scan_runtime(security)
 
 
 def deploy_hook_dispatcher(root: Path) -> None:

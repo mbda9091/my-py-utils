@@ -26,7 +26,7 @@ def executable(path: Path, content: str) -> None:
 
 
 @pytest.mark.parametrize("reject", [False, True])
-def test_independent_check_runs_after_security_without_modifying_it(
+def test_independent_check_runs_before_security_without_modifying_it(
     real_scanners: Path, *, reject: bool
 ) -> None:
     root = real_scanners
@@ -45,8 +45,11 @@ def test_independent_check_runs_after_security_without_modifying_it(
     git(root, "add", "sample.py")
     result = git(root, "commit", "-qm", "Independent checks", check=False)
     output = result.stdout + result.stderr
-    assert "PASS: 1 unique snapshots, 0 findings." in output
+    assert ("PASS: 1 unique snapshots, 0 findings." in output) is not reject
     assert "project-check-ran" in output
+    if not reject:
+        assert output.index("project-check-ran") < output.index("Checking staged snapshot")
+        assert output.count("Checking staged snapshot") == 1
     assert (result.returncode == 0) is not reject
     assert (git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0) is not reject
     assert security_before == {
@@ -56,6 +59,27 @@ def test_independent_check_runs_after_security_without_modifying_it(
         )
         for name in manage.RUNTIME_NAMES
     }
+
+
+@pytest.mark.parametrize("name", ["00-generator", "20-generator", "99-generator"])
+def test_index_changes_from_other_hooks_are_scanned_before_commit(
+    real_scanners: Path, name: str
+) -> None:
+    root = real_scanners
+    phone = "139" + "12345678"
+    (root / "sample.py").write_text("print('safe before generator')\n")
+    git(root, "add", "sample.py")
+    executable(
+        root / ".git/hooks/pre-commit.d" / name,
+        "printf '%s\\n' 'phone = \"" + phone + "\"' > sample.py\ngit add -- sample.py\n",
+    )
+    result = git(root, "commit", "-qm", "Generated secret must be blocked", check=False)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "CN_MOBILE_PHONE" in output
+    assert phone not in output
+    assert output.count("Checking staged snapshot") == 1
+    assert git(root, "rev-parse", "--verify", "HEAD", check=False).returncode != 0
 
 
 @pytest.mark.parametrize(

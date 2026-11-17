@@ -15,7 +15,7 @@ import pytest
 from repo_security.core import doctor_repository, plan_repository, setup_repository
 from repo_security.errors import RepoSecurityError
 from repo_security.main import main
-from repo_security.resources import write_template
+from repo_security.resources import template_files, write_template
 from repo_security.templates import manage
 
 from tests import test_repo_security as fixtures
@@ -24,9 +24,50 @@ from tests.test_repo_security import git
 repository = fixtures.repository
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 ERROR_EXIT = 2
+
+
+@pytest.mark.parametrize("state", ["healthy", "repairable", "persistent"])
+def test_python_health_controls_one_bounded_reinstall(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    write_template(repository)
+    record = manage.record_for(manage.make_plan(repository, template_files()))
+    commands: list[tuple[str, ...]] = []
+    probes: list[Path] = []
+
+    def run(command: Sequence[str], **_kwargs: object) -> str:
+        commands.append(tuple(command))
+        return ""
+
+    def probe(security: Path) -> None:
+        probes.append(security)
+        if state == "persistent" or (state == "repairable" and len(probes) == 1):
+            msg = "damaged Python tool"
+            raise RepoSecurityError(msg)
+
+    def gitleaks(security: Path, _previous: dict[str, str]) -> dict[str, str]:
+        assert security == repository / ".security"
+        return {}
+
+    def scan_runtime(security: Path) -> None:
+        assert security == repository / ".security"
+
+    monkeypatch.setattr(manage, "run_tool", run)
+    monkeypatch.setattr(manage, "verify_python_runtime", probe)
+    monkeypatch.setattr(manage, "install_gitleaks", gitleaks)
+    monkeypatch.setattr(manage, "verify_scan_runtime", scan_runtime)
+    if state == "persistent":
+        with pytest.raises(RepoSecurityError, match="damaged Python tool"):
+            manage.install_runtime(repository, record)
+    else:
+        manage.install_runtime(repository, record)
+    assert sum("--reinstall" in command for command in commands) == int(state != "healthy")
+    assert len(probes) == 1 + int(state != "healthy")
+    assert "--check" in commands[0]
 
 
 def snapshot(root: Path) -> dict[str, tuple[bytes, int, int]]:

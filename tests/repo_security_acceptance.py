@@ -185,7 +185,8 @@ def check_hooks(cli: Path, root: Path, remote: Path) -> None:
     assert all(tool + ":" in output for tool in ("Gitleaks", "Semgrep", "Presidio"))
     assert token not in output
     assert phone not in output
-    assert "independent-hook-ran" not in output
+    assert "independent-hook-ran" in output
+    assert output.index("independent-hook-ran") < output.index("Checking staged snapshot")
     assert git(root, "rev-parse", "HEAD") == clean
     git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "Synthetic risky intermediate")
     git(root, "add", "sample.py")
@@ -208,6 +209,42 @@ def check_hooks(cli: Path, root: Path, remote: Path) -> None:
     assert git(root, "--git-dir", str(remote), "rev-parse", "refs/heads/main") == git(
         root, "rev-parse", "HEAD"
     )
+
+
+def check_python_repair(cli: Path, root: Path, mode: str) -> str:
+    python = root / ".security/.venv/bin/python"
+    if mode == "single":
+        damaged = root / ".security/.venv/bin/semgrep"
+        damaged.unlink()
+        case = "missing-semgrep-launcher"
+    else:
+        located = run(
+            [
+                python,
+                "-B",
+                "-c",
+                "import importlib.util as u; print(u.find_spec('presidio_analyzer').origin)",
+            ],
+            cwd=root,
+        )
+        damaged = Path(located.stdout.strip())
+        assert damaged.is_relative_to(root / ".security/.venv")
+        # Break only this installation's file, never the shared uv cache inode.
+        damaged.unlink()
+        damaged.write_text(
+            "raise ImportError('Synthetic damaged installation')\n", encoding="utf-8"
+        )
+        case = "damaged-presidio-import"
+    run([cli, "setup", root], cwd=root, offline=True)
+    assert damaged.is_file()
+    assert json.loads((root / ".security/install-manifest.json").read_bytes())["status"] == "ready"
+    run(
+        [python, "-B", "-c", "from presidio_analyzer import Pattern, PatternRecognizer"],
+        cwd=root,
+        offline=True,
+    )
+    log(f"PASS {mode}: automatic Python runtime repair ({case})")
+    return case
 
 
 def exercise_mode(  # noqa: PLR0915 -- ordered installation and hook integration checkpoints
@@ -255,6 +292,7 @@ def exercise_mode(  # noqa: PLR0915 -- ordered installation and hook integration
     extra = root / ".git/hooks/pre-commit.d/20-project-checks"
     extra.write_text("#!/bin/sh\necho independent-hook-ran >&2\n", encoding="utf-8")
     extra.chmod(0o755)
+    result["python_runtime_repair"] = check_python_repair(cli, root, mode)
     before = configuration_snapshot(root)
     run([cli, "setup", root], cwd=work, offline=True)
     assert configuration_snapshot(root) == before

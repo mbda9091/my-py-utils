@@ -25,8 +25,10 @@ Setup accepts a repository root or a directory inside it. It writes `.security/`
 merges only necessary `.gitignore` entries, installs locked scanners in a separate
 uv-managed Python 3.13 environment, and enables only the repository-local
 pre-commit hook through a dispatcher in Git's default `.git/hooks/` directory.
-The dispatcher runs executable files in `.git/hooks/pre-commit.d/` in filename
-order; `10-security` is a relative symlink to `.security/hooks/pre-commit`.
+The dispatcher runs independent executable checks in `.git/hooks/pre-commit.d/`
+in filename order, then runs the mandatory security check once, last, so files
+staged by earlier checks are included. `10-security` is the reserved security
+member and a relative symlink to `.security/hooks/pre-commit`.
 After deploying reviewed files, setup enables the hook before
 installing tools; the hook blocks commits while setup is incomplete or locked.
 Only successful real synthetic sample checks mark the installation ready.
@@ -62,7 +64,10 @@ migrate intentionally, or install into a fresh repository.
 The ignored, machine-local `.security/install-manifest.json` records release and
 installed file hashes, original local hooks settings, verified Gitleaks archive
 and executable digests, and the last installation phase. Missing or damaged tools
-can be repaired by rerunning the same setup. On failure it records incomplete
+can be repaired by rerunning the same setup. Python tool health checks inspect
+actual launchers, imports and versions, rather than only installed package
+metadata. A failed health check triggers one locked dependency reinstall and
+reverification; persistent errors leave the installation incomplete. On failure it records incomplete
 state and preserves generated files for retry, while removing normal temporary
 files and releasing the lock. Once the pre-commit hook has been deployed and
 enabled, a failed first installation or repair keeps it active and leaves the
