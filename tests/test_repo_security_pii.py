@@ -29,6 +29,109 @@ def scan(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_real_default_user_paths_and_placeholder_boundaries(real_scanners: Path) -> None:
+    mac = "/Users/" + "synthetic-person"
+    linux = "/home/" + "synthetic-person"
+    windows = "C:\\Users\\" + "synthetic-person"
+    cases = [
+        (mac, True),
+        (linux + "/private/repo", True),
+        ("cache = '" + mac + "/cache'", True),
+        ("# directory: " + linux + "/docs", True),
+        ("file://" + mac + "/notes", True),
+        (windows + "\\private\\repo", True),
+        (json.dumps(windows + "\\repo"), True),
+        ("d:/users/" + "Synthetic Person/repo", True),
+        ("/home/" + "测试用户/repo", True),
+        ("/home/" + "first.last-1_2/repo", True),
+        ("safe\npath = '" + linux + "/repo'\n", True),
+        ("~/private/repo", False),
+        ("$HOME/private/repo", False),
+        ("${HOME}/private/repo", False),
+        ("%USERPROFILE%\\private\\repo", False),
+        ("/Users/<username>/repo", False),
+        ("/home/{username}/repo", False),
+        ("/home/$USER/repo", False),
+        ("/home/${USER}/repo", False),
+        ("C:\\Users\\<username>\\repo", False),
+        ("C:\\Users\\%USERNAME%\\repo", False),
+        ("/Users/", False),
+        ("/home/", False),
+        ("src" + linux + "/repo", False),
+        ("/srv" + linux + "/repo", False),
+        ("https://example.com" + linux + "/repo", False),
+        ("/usr/local/bin/tool", False),
+    ]
+    check = """
+import json, re, sys
+sys.path.insert(0, sys.argv[1])
+from pii import detect, make_recognizers
+from pathlib import Path
+cases, project_policy = json.load(sys.stdin)
+default_policy = json.loads(Path(sys.argv[1], 'policy.json').read_text())
+for policy in (default_policy, project_policy):
+    assert not policy['custom_patterns']
+    recognizers = make_recognizers(policy)
+    for number, (text, expected) in enumerate(cases):
+        findings = detect(text, recognizers, policy)
+        assert bool(findings) == expected, (number, findings, expected)
+        assert all(entity == 'LOCAL_USER_PATH' for _, entity in findings), number
+    assert detect(cases[10][0], recognizers, policy) == [(2, 'LOCAL_USER_PATH')]
+    policy['pii_allowlist'].append({
+        'entity': 'LOCAL_USER_PATH',
+        'regex': re.escape(cases[0][0]),
+        'paths': ['approved.txt'],
+    })
+    assert detect(cases[0][0], recognizers, policy, path='approved.txt') == []
+    assert detect(cases[0][0], recognizers, policy, path='other.txt')
+print(json.dumps({'cases': len(cases)}))
+"""
+    result = subprocess.run(  # noqa: S603 -- actual offline Presidio runtime in a disposable repo
+        [
+            str(real_scanners / ".security/.venv/bin/python"),
+            "-I",
+            "-B",
+            "-c",
+            check,
+            str(real_scanners / ".security"),
+        ],
+        input=json.dumps([cases, json.loads((PROJECT / ".security/policy.json").read_text())]),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["cases"] == len(cases)
+
+
+def test_real_default_user_path_scan_and_commit_redact_values(real_scanners: Path) -> None:
+    paths = [
+        "/Users/" + "synthetic-person/private",
+        "/home/" + "synthetic-person/private",
+        "C:\\Users\\" + "synthetic-person\\private",
+    ]
+    target = real_scanners / "settings.json"
+    target.write_text(json.dumps(paths, indent=2) + "\n")
+    git(real_scanners, "add", target.name)
+    # A safe working copy must not hide sensitive paths already in the index.
+    target.write_text('["~/private"]\n')
+    result = scan(real_scanners)
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert output.count("[LOCAL_USER_PATH]") == len(paths)
+    assert "synthetic-person" not in output
+    commit = git(real_scanners, "commit", "-m", "Block private user paths", check=False)
+    output = commit.stdout + commit.stderr
+    assert commit.returncode != 0
+    assert "[LOCAL_USER_PATH]" in output
+    assert "synthetic-person" not in output
+    git(real_scanners, "add", target.name)
+    clean = scan(real_scanners)
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert git(real_scanners, "commit", "-m", "Allow portable paths").returncode == 0
+
+
 def test_real_pii_context_and_exact_path_boundaries(real_scanners: Path) -> None:
     phone = "139" + "12345678"
     ssh_user = "git@" + "github.com"

@@ -271,7 +271,7 @@ agent-skills/
     "skill": "grill-me",
     "target": "codex",
     "commit": "abc1234",
-    "path": "/Users/example/.agents/skills/grill-me"
+    "path": "/Users/<username>/.agents/skills/grill-me"
   }
 }
 ```

@@ -30,7 +30,7 @@ def test_security_blocks_token_patterns_without_printing_value(tmp_path: Path) -
 
 def test_security_blocks_local_absolute_paths(tmp_path: Path) -> None:
     (tmp_path / "SKILL.md").write_text(
-        "Use /Users/example/.agents/skills/foo as a placeholder.\n",
+        "Use /Users/" + "example/.agents/skills/foo as a placeholder.\n",
         encoding="utf-8",
     )
 

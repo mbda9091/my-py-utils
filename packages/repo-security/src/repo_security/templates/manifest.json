@@ -34,7 +34,7 @@
       "source_sha256": "650fe54688dd8d69ee279b56a3f8f5570458f3e3a69609d0f2260849b49d72d9",
       "resource": "pii.py.template",
       "destination": ".security/pii.py",
-      "sha256": "5730714f4a93801c260d92ad394dc4b4dad636b810a0709736b326c4ea366945",
+      "sha256": "26182d1f9ea66d5984f95afcc8d555be105f74b282d0624bad26df4d99208581",
       "executable": false
     },
     {

@@ -178,6 +178,23 @@ Windows-mounted filesystem support.
 PII detection distinguishes numeric IDs in GitHub artifact URLs and the service
 account in GitHub SCP-style SSH remotes from ordinary phone/email text. Other
 hosts, query parameters and adjacent sensitive values remain covered.
+
+User home paths are detected by default as `LOCAL_USER_PATH`, including macOS
+`/Users/<username>/…`, Linux `/home/<username>/…`, and Windows
+`C:\Users\<username>\…` with a literal username. Detection includes escaped
+Windows paths in source strings and JSON, as well as code comments, configuration
+and documentation. These are offline pattern checks, not an assessment of every
+directory name: arbitrary private project names and custom home roots are not
+covered. Existing repositories receive the default recognizer when their managed
+scanner runtime is upgraded; existing allowlists and custom patterns are retained.
+
+Use `~`, `$HOME`, `%USERPROFILE%`, or explicit username placeholders such as
+`<username>` instead of personal absolute paths. Those forms are not flagged.
+Findings report only the file, line and entity type, never the matched username
+or directory. An intentional literal path can use a narrow `LOCAL_USER_PATH`
+entry in `pii_allowlist`; its regex must match the detected prefix through the
+username, without the remaining subdirectories.
+
 Project-specific `pii_allowlist` entries may include `paths`, a non-empty list of
 exact repository-relative file paths. The entity and full value regex must also
 match; omitting `paths` keeps the existing global behavior. Record the reviewed
