@@ -6,6 +6,14 @@
   "source_license": "No license file supplied; user-directed migration for this personal repository. No public redistribution license inferred.",
   "files": [
     {
+      "source": null,
+      "source_sha256": null,
+      "resource": "setup.sh.template",
+      "destination": ".security/setup.sh",
+      "sha256": "5f686cc771458166490b471ce603323e2cd714276aedf61b39fb4604b8d7734e",
+      "executable": true
+    },
+    {
       "source": ".security/setup.py",
       "source_sha256": "a57846f9af8a701ddc7da2bf3d192992f97a6a6453acddcccfbfa13aa655b2d7",
       "resource": "setup.py.template",
@@ -18,7 +26,7 @@
       "source_sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
       "resource": "scan.py.template",
       "destination": ".security/scan.py",
-      "sha256": "ad4ca1202404b10633110e293f21fded7ec4184c6b16f8e352da3732994c13e5",
+      "sha256": "35136b8c3e2629a5eb4e3607f7c5b1afc8be503acb93afe3f922e46ff3f47faf",
       "executable": false
     },
     {
@@ -34,7 +42,7 @@
       "source_sha256": "a2ee0698adde6f2ca39ddcaf72c8a807a2a93039ab2ccbbad6efc6564f609bf0",
       "resource": "run.template",
       "destination": ".security/run",
-      "sha256": "a2ee0698adde6f2ca39ddcaf72c8a807a2a93039ab2ccbbad6efc6564f609bf0",
+      "sha256": "48ca8b92b0b0c57b822acf4558c5c36eb35521353be170a821700a396d9d063e",
       "executable": true
     },
     {
@@ -82,15 +90,7 @@
       "source_sha256": "3bcd98004cf274f1dda23b1803b2761b834ebccea810dacedfa9205354cd48b6",
       "resource": "hooks/pre-commit.template",
       "destination": ".security/hooks/pre-commit",
-      "sha256": "3bcd98004cf274f1dda23b1803b2761b834ebccea810dacedfa9205354cd48b6",
-      "executable": true
-    },
-    {
-      "source": ".security/hooks/pre-push",
-      "source_sha256": "794c853e72ee45d2961c90e175db1c9d69b06b84cd07744a05ba296d9aa3c6bc",
-      "resource": "hooks/pre-push.template",
-      "destination": ".security/hooks/pre-push",
-      "sha256": "794c853e72ee45d2961c90e175db1c9d69b06b84cd07744a05ba296d9aa3c6bc",
+      "sha256": "6b1a72728c01f69f66ba5ccf3749c2ded3cc4afea899f7976a66e2028a801f4c",
       "executable": true
     },
     {
@@ -114,7 +114,7 @@
       "source_sha256": null,
       "resource": "manage.py",
       "destination": ".security/manage.py",
-      "sha256": "2641a873465538a3fe73027f676e45b0a5728749c4988707518a9104f52dac23",
+      "sha256": "e5134db3d8132ade788a68e7a373de8426dbcb4c7afc768f7cb5625bfe2bb1a9",
       "executable": false
     }
   ]

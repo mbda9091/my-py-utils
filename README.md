@@ -30,7 +30,7 @@ skill-sync 个人 GitHub 同步工具方案见
 ## Common Commands
 
 ```bash
-uv sync --all-groups --all-packages
+make dev
 uv run pytest
 uv run ruff check .
 uv run ruff format .
@@ -49,11 +49,17 @@ uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.gi
 
 ## Initialize This Project
 
-Install or refresh the workspace environment:
+Initialize or refresh the development environment after cloning:
 
 ```bash
-uv sync --all-groups --all-packages
+make dev
 ```
+
+This configures repository security checks and Git hooks, then installs all
+workspace dependencies with uv. Both steps must succeed for initialization to
+complete. Git, uv and make must be available; the security installer manages its
+own Python environment. Repeating the command preserves independent hook checks.
+Running `uv sync` directly only installs workspace dependencies.
 
 Run the standard checks:
 

@@ -28,7 +28,7 @@ def commit(root: Path, text: str) -> str:
     return git(root, "rev-parse", "HEAD").stdout.strip()
 
 
-def test_real_push_covers_intermediate_commits_multiple_refs_and_deletions(
+def test_manual_push_scan_covers_intermediate_commits_multiple_refs_and_deletions(
     real_scanners: Path,
     tmp_path: Path,
 ) -> None:
@@ -42,8 +42,23 @@ def test_real_push_covers_intermediate_commits_multiple_refs_and_deletions(
     commit(root, f'phone = "{phone}"\n')
     commit(root, "print('removed')\n")
     git(root, "tag", "-a", "v1", "-m", "Synthetic tag")
-    result = git(root, "push", "test", "HEAD:refs/heads/main", "refs/tags/v1", check=False)
-    assert result.returncode != 0
+    tip = git(root, "rev-parse", "HEAD").stdout.strip()
+    tag = git(root, "rev-parse", "refs/tags/v1").stdout.strip()
+    zero = "0" * 40
+
+    def scan_refs(lines: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 -- optional manual scan, local Git objects only
+            [str(root / ".security/run"), "pre-push"],
+            input=lines,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    result = scan_refs(
+        f"refs/heads/main {tip} refs/heads/main {clean}\nrefs/tags/v1 {tag} refs/tags/v1 {zero}\n"
+    )
+    assert result.returncode == 1
     assert "CN_MOBILE_PHONE" in result.stdout + result.stderr
     assert phone not in result.stdout + result.stderr
     assert (
@@ -53,11 +68,17 @@ def test_real_push_covers_intermediate_commits_multiple_refs_and_deletions(
         git(root, "--git-dir", str(remote), "show-ref", "refs/tags/v1", check=False).returncode != 0
     )
     # First push of a new ref must still detect the removed ancestor content.
-    result = git(root, "push", "test", "HEAD:refs/heads/new", check=False)
-    assert result.returncode != 0
+    result = scan_refs(f"refs/heads/main {tip} refs/heads/new {zero}\n")
+    assert result.returncode == 1
     assert "CN_MOBILE_PHONE" in result.stdout + result.stderr
+    # Commit-only mode does not run this manual scanner during an actual push.
+    assert not (root / ".security/hooks/pre-push").exists()
+    pushed = git(root, "push", "test", "HEAD:refs/heads/main", "refs/tags/v1")
+    assert "Checking " not in pushed.stdout + pushed.stderr
+    assert git(root, "--git-dir", str(remote), "rev-parse", "refs/heads/main").stdout.strip() == tip
     # Ref deletion introduces no snapshots and may proceed even with unsafe local history.
-    git(root, "push", "test", ":refs/heads/main")
+    assert scan_refs(f"(delete) {zero} refs/heads/main {tip}\n").returncode == 0
+    git(root, "push", "test", ":refs/heads/main", ":refs/tags/v1")
     assert git(root, "--git-dir", str(remote), "show-ref", check=False).stdout == ""
 
 

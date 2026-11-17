@@ -1,6 +1,7 @@
 .PHONY: dev lint format test typecheck check build
 
 dev:
+	.security/setup.sh
 	uv sync --all-groups --all-packages
 
 lint:

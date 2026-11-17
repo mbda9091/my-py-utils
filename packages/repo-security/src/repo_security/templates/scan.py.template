@@ -202,8 +202,15 @@ def push_commits(root, stream):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["staged", "head", "history", "pre-push"])
+    parser.add_argument("--require-ready", action="store_true", help="Reject unready commit hooks.")
     args = parser.parse_args()
     root = Path(git(SECURITY, "rev-parse", "--show-toplevel").decode().strip())
+    if args.require_ready:
+        from manage import RepoSecurityError, require_commit_ready
+        try:
+            require_commit_ready(root)
+        except RepoSecurityError as error:
+            raise RuntimeError(str(error)) from None
     if git(root, "rev-parse", "--is-shallow-repository").decode().strip() == "true":
         print("COVERAGE WARNING: shallow clone; local objects do not cover complete remote history.", file=sys.stderr)
     policy = json.loads((SECURITY / "policy.json").read_text())

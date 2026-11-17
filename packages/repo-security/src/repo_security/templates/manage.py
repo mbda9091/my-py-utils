@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import urllib.request
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
 TEMPLATE_VERSION = "0.2.0"
 GITLEAKS_VERSION = "8.30.1"
+SCANNER_VERSIONS = {"semgrep": "1.185.0", "presidio-analyzer": "2.2.366"}
 CHECKSUMS = {
     ("Linux", "x86_64"): "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
     ("Linux", "aarch64"): "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",
@@ -32,6 +34,29 @@ CHECKSUMS = {
 MANIFEST = ".security/install-manifest.json"
 WORKFLOW = ".github/workflows/repo-security.yml"
 HOOKS_PATH = ".security/hooks"
+HOOK_ENTRY = ".git/hooks/pre-commit"
+HOOK_LINK = ".git/hooks/pre-commit.d/10-security"
+HOOK_TARGET = "../../../.security/hooks/pre-commit"
+HOOK_DISPATCHER = b"""#!/bin/sh
+# Add independent executable checks to .git/hooks/pre-commit.d/.
+set -eu
+repo_root=$(git rev-parse --show-toplevel)
+hook_dir="$repo_root/.git/hooks/pre-commit.d"
+if [ ! -f "$hook_dir/10-security" ] || [ ! -x "$hook_dir/10-security" ]; then
+    echo 'Security pre-commit check is missing or not executable; rerun setup.' >&2
+    exit 2
+fi
+for hook in "$hook_dir"/*; do
+    if [ ! -e "$hook" ] && [ ! -L "$hook" ]; then
+        continue
+    fi
+    if [ ! -f "$hook" ] || [ ! -x "$hook" ]; then
+        echo "Pre-commit check is not an executable file: $hook" >&2
+        exit 2
+    fi
+    "$hook" "$@"
+done
+"""
 IGNORE_ENTRIES = (
     "/.security/.venv/",
     "/.security/bin/",
@@ -39,6 +64,7 @@ IGNORE_ENTRIES = (
     "/.security/install-manifest.json",
 )
 RUNTIME_NAMES = (
+    "setup.sh",
     "setup.py",
     "manage.py",
     "scan.py",
@@ -51,7 +77,6 @@ RUNTIME_NAMES = (
     "semgrep.yml",
     "policy.json",
     "hooks/pre-commit",
-    "hooks/pre-push",
 )
 CUSTOMIZABLE = {".security/gitleaks.toml", ".security/semgrep.yml", ".security/policy.json"}
 
@@ -114,7 +139,8 @@ class InstallPlan:
             *(f"KEEP {name}" for name in self.keep),
             *(f"CHMOD {name}" for name in self.repair),
             *(f"CONFLICT {reason}" for reason in self.conflicts),
-            f"Git hooks: {self.hooks.effective or '(default)'} -> {HOOKS_PATH} (local)",
+            f"Git hook entry: {HOOK_ENTRY} (dispatcher; preserves independent checks)",
+            f"Security check: {HOOK_LINK} -> {HOOK_TARGET} (relative symlink)",
             f"Hooks source: {self.hooks.origin or '(unset)'}",
             "Install/verify: Python 3.13, locked Semgrep/Presidio, SHA-256 checked Gitleaks.",
             "May download into .security and uv's Python/package caches; no business history scan.",
@@ -230,25 +256,53 @@ def read_record(root: Path) -> InstallRecord | None:
         raise RepoSecurityError(msg) from error
 
 
+def hook_link_matches(root: Path) -> bool:
+    path = root / HOOK_LINK
+    return (
+        not path_problem(root, ".git/hooks/pre-commit.d", directory=True)
+        and path.is_symlink()
+        and str(path.readlink()) == HOOK_TARGET
+    )
+
+
+def hooks_enabled(root: Path, hooks: HooksState) -> bool:
+    path = root / HOOK_ENTRY
+    return (
+        hooks.effective is None
+        and not hooks.local
+        and hook_link_matches(root)
+        and not path_problem(root, HOOK_ENTRY)
+        and path.is_file()
+        and path.read_bytes() == HOOK_DISPATCHER
+        and os.access(path, os.X_OK)
+    )
+
+
 def hook_conflicts(root: Path, hooks: HooksState) -> list[str]:
-    if hooks.effective is not None:
-        if hooks.effective != HOOKS_PATH or any(x != HOOKS_PATH for x in hooks.local):
-            return [
-                f"core.hooksPath from {hooks.origin}: existing hook manager; "
-                "merge .security/run staged and pre-push manually"
-            ]
-        return []
     conflicts: list[str] = []
-    for name in ("pre-commit", "pre-push"):
-        result = git(root, "rev-parse", "--git-path", "hooks/" + name)
-        if result.returncode:
-            msg = "Cannot locate existing Git hooks"
-            raise RepoSecurityError(msg)
-        path = Path(result.stdout.rstrip("\n"))
-        if not path.is_absolute():
-            path = root / path
-        if path.exists() or path.is_symlink():
-            conflicts.append(f"Existing {name}; merge .security/run staged and pre-push manually")
+    if hooks.effective is not None and (
+        hooks.effective != HOOKS_PATH or hooks.local != (HOOKS_PATH,)
+    ):
+        conflicts.append(
+            f"core.hooksPath from {hooks.origin}: existing hook manager; "
+            "review and migrate existing hooks before enabling the managed pre-commit hook"
+        )
+    problem = path_problem(root, ".git/hooks/pre-commit.d", directory=True)
+    if problem:
+        conflicts.append(problem)
+    else:
+        path = root / HOOK_LINK
+        if (path.exists() or path.is_symlink()) and not hook_link_matches(root):
+            conflicts.append("Existing security hook member; review it before managed hook setup")
+    problem = path_problem(root, HOOK_ENTRY)
+    if problem:
+        conflicts.append(problem)
+    else:
+        entry = root / HOOK_ENTRY
+        if entry.exists() and entry.read_bytes() != HOOK_DISPATCHER:
+            conflicts.append(
+                "Existing pre-commit; review and integrate it before managed hook setup"
+            )
     return conflicts
 
 
@@ -285,6 +339,12 @@ def make_plan(  # noqa: C901, PLR0912, PLR0915 -- aggregate all conflicts before
     )
     hooks = hooks_state(root)
     conflicts.extend(hook_conflicts(root, hooks))
+    legacy_push = root / HOOKS_PATH / "pre-push"
+    if legacy_push.exists() or legacy_push.is_symlink():
+        conflicts.append(
+            "Legacy pre-push hook present; review and remove .security/hooks/pre-push "
+            "before commit-only setup"
+        )
     if (platform.system(), platform.machine()) not in CHECKSUMS:
         conflicts.append("Unsupported platform; use Linux/macOS x64/arm64 or WSL")
     if shutil.which("uv") is None:
@@ -543,10 +603,8 @@ def install_gitleaks(security: Path, previous: dict[str, str]) -> dict[str, str]
 
 def verify_runtime(security: Path) -> None:
     python = security / ".venv/bin/python"
-    command = (
-        "from importlib.metadata import version; "
-        "assert version('semgrep') == '1.185.0'; "
-        "assert version('presidio-analyzer') == '2.2.366'"
+    command = "from importlib.metadata import version; " + "; ".join(
+        f"assert version({name!r}) == {expected!r}" for name, expected in SCANNER_VERSIONS.items()
     )
     env = uv_environment()
     run_tool([str(python), "-B", "-c", command], cwd=security, env=env)
@@ -585,46 +643,48 @@ def install_runtime(root: Path, record: InstallRecord) -> None:
     verify_runtime(security)
 
 
+def deploy_hook_dispatcher(root: Path) -> None:
+    path = root / HOOK_LINK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not hook_link_matches(root):
+        path.symlink_to(HOOK_TARGET)  # Exclusive creation never overwrites another hook.
+    entry = root / HOOK_ENTRY
+    if not entry.exists():
+        create_resource(entry, TemplateFile(HOOK_ENTRY, HOOK_DISPATCHER, executable=True))
+    elif not os.access(entry, os.X_OK):
+        entry.chmod(entry.stat().st_mode | stat.S_IXUSR)
+
+
 def activate_hooks(plan: InstallPlan) -> None:
     if hooks_state(plan.root) != plan.hooks:
         msg = "Hooks configuration changed during setup; preserving external edits"
         raise RepoSecurityError(msg)
-    if plan.hooks.local == (HOOKS_PATH,) and plan.hooks.effective == HOOKS_PATH:
-        return
-    if git(
-        plan.root, "config", "--local", "--replace-all", "core.hooksPath", HOOKS_PATH
-    ).returncode:
-        msg = "Cannot enable repository-local hooks"
+    conflicts = hook_conflicts(plan.root, plan.hooks)
+    if conflicts:
+        raise RepoSecurityError("\n".join(conflicts))
+    deploy_hook_dispatcher(plan.root)
+    if hooks_state(plan.root) != plan.hooks:
+        msg = "Hooks configuration changed during setup; preserving external edits"
+        raise RepoSecurityError(msg)
+    if (
+        plan.hooks.local
+        and git(plan.root, "config", "--local", "--unset-all", "core.hooksPath").returncode
+    ):
+        msg = "Cannot remove legacy repository-local hooks path"
         raise RepoSecurityError(msg)
     try:
-        if hooks_state(plan.root).effective != HOOKS_PATH:
+        if not hooks_enabled(plan.root, hooks_state(plan.root)):
             msg = "Hooks configuration did not take effect"
             raise RepoSecurityError(msg)  # noqa: TRY301 -- rollback follows this verification failure
     except (RepoSecurityError, OSError, ValueError, subprocess.SubprocessError):
         current = hooks_state(plan.root)
-        if current.local == (HOOKS_PATH,):
-            git(plan.root, "config", "--local", "--unset-all", "core.hooksPath")
+        if plan.hooks.local and not current.local:
             for value in plan.hooks.local:
                 git(plan.root, "config", "--local", "--add", "core.hooksPath", value)
         raise
 
 
-def restore_hooks(plan: InstallPlan) -> None:
-    current = hooks_state(plan.root)
-    if current.local != (HOOKS_PATH,) or current.effective != HOOKS_PATH:
-        return  # A concurrent writer owns this value; do not overwrite it.
-    if current.local == plan.hooks.local:
-        return  # Existing protection must stay active on a failed repair.
-    if git(plan.root, "config", "--local", "--unset-all", "core.hooksPath").returncode:
-        msg = "Cannot restore original local hooks setting; inspect Git configuration"
-        raise RepoSecurityError(msg)
-    for value in plan.hooks.local:
-        if git(plan.root, "config", "--local", "--add", "core.hooksPath", value).returncode:
-            msg = "Cannot restore original local hooks value; inspect Git configuration"
-            raise RepoSecurityError(msg)
-
-
-def execute_setup(  # noqa: C901 -- phase checkpoints, hook activation and recovery stay ordered
+def execute_setup(  # noqa: C901, PLR0912 -- phase checkpoints and hook activation stay ordered
     root: Path,
     resources: tuple[TemplateFile, ...],
     *,
@@ -639,11 +699,11 @@ def execute_setup(  # noqa: C901 -- phase checkpoints, hook activation and recov
         if plan.conflicts:
             raise RepoSecurityError("\n".join(plan.conflicts))
         record = record_for(plan)
-        activated = False
         updating = (
             not plan.previous
             or plan.previous["status"] != "ready"
             or bool(plan.create or plan.repair)
+            or (install_hooks and not hooks_enabled(root, plan.hooks))
         )
         (root / ".security").mkdir(exist_ok=True)
         try:
@@ -653,6 +713,9 @@ def execute_setup(  # noqa: C901 -- phase checkpoints, hook activation and recov
             record["phase"] = "deployed"
             if updating:
                 save_record(root, record)
+            if install_hooks:
+                # The deployed hook refuses commits while setup is incomplete or locked.
+                activate_hooks(plan)
             install_runtime(root, record)
             record["phase"] = "tools-verified"
             if updating:
@@ -663,12 +726,13 @@ def execute_setup(  # noqa: C901 -- phase checkpoints, hook activation and recov
                 msg = "Installation changed during verification; rerun setup after review"
                 raise RepoSecurityError(msg)  # noqa: TRY301 -- persist incomplete state on failure
             if install_hooks:
-                activate_hooks(plan)
-                activated = True
+                if not hooks_enabled(root, final.hooks):
+                    msg = "Security hooks changed during installation; rerun setup"
+                    raise RepoSecurityError(msg)  # noqa: TRY301 -- never mark disabled hooks ready
                 record["status"], record["phase"] = "ready", "ready"
             else:
                 record["phase"] = "tools-verified"
-                if plan.hooks.local == (HOOKS_PATH,) and plan.hooks.effective == HOOKS_PATH:
+                if hooks_enabled(root, final.hooks):
                     record["status"], record["phase"] = "ready", "ready"
             save_record(root, record)
         except (
@@ -681,8 +745,7 @@ def execute_setup(  # noqa: C901 -- phase checkpoints, hook activation and recov
             record["status"] = "incomplete"
             if record["phase"] == "ready":
                 record["phase"] = "tools-verified"
-            if activated:
-                restore_hooks(plan)
+            # Keep successfully installed protection active: an unready setup must block commits.
             save_record(root, record)
             raise
     return plan
@@ -704,7 +767,7 @@ def diagnose(root: Path, resources: tuple[TemplateFile, ...]) -> tuple[bool, tup
     if not plan.previous or plan.previous["status"] != "ready":
         messages.append("ERROR installation manifest missing or incomplete; run setup")
         healthy = False
-    if plan.hooks.effective != HOOKS_PATH:
+    if not hooks_enabled(root, plan.hooks):
         messages.append("ERROR repository security hooks are not active")
         healthy = False
     unsafe = any(
@@ -746,6 +809,63 @@ def trusted_binary(root: Path, record: InstallRecord | None) -> bool:
     )
 
 
+def _require_registered_files(root: Path, record: InstallRecord) -> None:
+    for name in RUNTIME_NAMES:
+        relative = ".security/" + name
+        path = root / relative
+        if path_problem(root, relative) or not path.is_file():
+            msg = f"Required security file is missing or linked: {relative}"
+            raise RepoSecurityError(msg)
+        info = record["files"][relative]
+        if hashlib.sha256(path.read_bytes()).hexdigest() != info["installed_sha256"]:
+            msg = f"Security file changed since installation: {relative}; review and reinstall"
+            raise RepoSecurityError(msg)
+        if info["executable"] and not os.access(path, os.X_OK):
+            msg = f"Security entry point is not executable: {relative}"
+            raise RepoSecurityError(msg)
+
+
+def _require_commit_tools(root: Path, record: InstallRecord) -> None:
+    if not trusted_binary(root, record) or not os.access(root / ".security/bin/gitleaks", os.X_OK):
+        msg = "Gitleaks is missing or its installed digest does not match; rerun setup"
+        raise RepoSecurityError(msg)
+    for tool in ("python", "semgrep"):
+        path = root / ".security/.venv/bin" / tool
+        if not path.is_file() or not os.access(path, os.X_OK):
+            msg = f"Security tool is missing or not executable: {tool}; rerun setup"
+            raise RepoSecurityError(msg)
+    for name, expected in SCANNER_VERSIONS.items():
+        try:
+            actual = version(name)
+        except PackageNotFoundError as error:
+            msg = f"Security dependency is missing: {name}; rerun setup"
+            raise RepoSecurityError(msg) from error
+        if actual != expected:
+            msg = f"Security dependency has an unexpected version: {name}; rerun setup"
+            raise RepoSecurityError(msg)
+
+
+def require_commit_ready(root: Path) -> None:
+    lock = root / ".git/repo-security-setup.lock"
+    if lock.exists() or lock.is_symlink():
+        msg = "Security setup is running or interrupted; resolve its setup lock before committing"
+        raise RepoSecurityError(msg)
+    record = read_record(root)
+    if record is None or record["status"] != "ready" or record["phase"] != "ready":
+        msg = "Security installation is not ready; run .security/setup.sh"
+        raise RepoSecurityError(msg)
+    hooks = hooks_state(root)
+    if not hooks_enabled(root, hooks):
+        msg = "Security hooks are not enabled; run .security/setup.sh"
+        raise RepoSecurityError(msg)
+    legacy_push = root / HOOKS_PATH / "pre-push"
+    if legacy_push.exists() or legacy_push.is_symlink():
+        msg = "Legacy pre-push hook remains; review and remove it for commit-only setup"
+        raise RepoSecurityError(msg)
+    _require_registered_files(root, record)
+    _require_commit_tools(root, record)
+
+
 def standalone_main(security: Path, *, install_hooks: bool) -> None:
     root = repository_root(security.parent)
     for name in RUNTIME_NAMES:
@@ -756,7 +876,7 @@ def standalone_main(security: Path, *, install_hooks: bool) -> None:
         TemplateFile(
             ".security/" + name,
             (security / name).read_bytes(),
-            name == "run" or name.startswith("hooks/"),
+            name in ("run", "setup.sh") or name.startswith("hooks/"),
         )
         for name in RUNTIME_NAMES
     )

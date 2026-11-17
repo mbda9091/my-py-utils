@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import subprocess
 from importlib.resources import files
 from pathlib import Path
@@ -13,6 +14,7 @@ from repo_security.core import setup_repository
 from repo_security.errors import RepoSecurityError
 from repo_security.main import main
 from repo_security.resources import template_files, write_template
+from repo_security.templates import manage
 from repo_security.templates.manage import repository_root
 
 ERROR_EXIT = 2
@@ -76,7 +78,12 @@ def test_corrupt_resource_is_rejected_before_writes(
     templates.mkdir(parents=True)
     source = files("repo_security").joinpath("templates")
     templates.joinpath("manifest.json").write_bytes(source.joinpath("manifest.json").read_bytes())
-    templates.joinpath("setup.py.template").write_bytes(b"corrupt")
+    first_resource = json.loads(source.joinpath("manifest.json").read_text())["files"][0][
+        "resource"
+    ]
+    corrupt = templates / first_resource
+    corrupt.parent.mkdir(parents=True, exist_ok=True)
+    corrupt.write_bytes(b"corrupt")
 
     def bundled_files(_package: str) -> Path:
         return bundle
@@ -158,8 +165,35 @@ def real_scanners(repository: Path) -> Path:
     write_template(repository)
     security = repository / ".security"
     (security / ".venv").symlink_to(runtime / ".venv", target_is_directory=True)
-    (security / "bin").symlink_to(runtime / "bin", target_is_directory=True)
-    git(repository, "config", "core.hooksPath", ".security/hooks")
+    (security / "bin").mkdir()
+    os.link(runtime / "bin/gitleaks", security / "bin/gitleaks")
+    (repository / manage.HOOK_LINK).parent.mkdir()
+    (repository / manage.HOOK_LINK).symlink_to(manage.HOOK_TARGET)
+    dispatcher = repository / manage.HOOK_ENTRY
+    dispatcher.write_bytes(manage.HOOK_DISPATCHER)
+    dispatcher.chmod(0o755)
+    # Register this isolated fixture; only dependencies are shared with the real runtime.
+    record: manage.InstallRecord = {
+        "schema_version": 1,
+        "template_version": manage.TEMPLATE_VERSION,
+        "status": "ready",
+        "phase": "ready",
+        "files": {
+            item.destination: {
+                "template_sha256": item.digest,
+                "installed_sha256": item.digest,
+                "executable": item.executable,
+            }
+            for item in template_files()
+        },
+        "original_local_hooks": [],
+        "gitleaks": {
+            "version": manage.GITLEAKS_VERSION,
+            "archive_sha256": manage.CHECKSUMS[(platform.system(), platform.machine())],
+            "sha256": hashlib.sha256((security / "bin/gitleaks").read_bytes()).hexdigest(),
+        },
+    }
+    (security / "install-manifest.json").write_text(json.dumps(record))
     return repository
 
 

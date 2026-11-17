@@ -165,7 +165,10 @@ def check_hooks(cli: Path, root: Path, remote: Path) -> None:
     safe_text = "print('safe')\n"
     app.write_text(safe_text, encoding="utf-8")
     git(root, "add", ".")
-    git(root, "commit", "-qm", "Reviewed generated configuration")
+    committed = run(
+        ["git", "-C", root, "commit", "-qm", "Reviewed generated configuration"], cwd=root
+    )
+    assert "independent-hook-ran" in committed.stdout + committed.stderr
     clean = git(root, "rev-parse", "HEAD")
     run([cli, "scan", root, "--mode", "head"], cwd=root)
     run([cli, "scan", root, "--mode", "history"], cwd=root)
@@ -182,22 +185,32 @@ def check_hooks(cli: Path, root: Path, remote: Path) -> None:
     assert all(tool + ":" in output for tool in ("Gitleaks", "Semgrep", "Presidio"))
     assert token not in output
     assert phone not in output
+    assert "independent-hook-ran" not in output
     assert git(root, "rev-parse", "HEAD") == clean
     git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "Synthetic risky intermediate")
     git(root, "add", "sample.py")
     git(root, "commit", "-qm", "Restore safe file")
     git(root, "init", "--bare", "-q", str(remote))
     git(root, "remote", "add", "test", str(remote))
-    blocked = run(["git", "-C", root, "push", "test", "HEAD:refs/heads/main"], cwd=root, expected=1)
+    blocked = run([cli, "scan", root, "--mode", "history"], cwd=root, expected=1)
     output = blocked.stdout + blocked.stderr
     assert all(tool + ":" in output for tool in ("Gitleaks", "Semgrep", "Presidio"))
     assert token not in output
     assert phone not in output
-    git(root, "push", "test", clean + ":refs/heads/main")
-    assert git(root, "--git-dir", str(remote), "rev-parse", "refs/heads/main") == clean
+    assert not (root / ".security/hooks/pre-push").exists()
+    assert not (root / ".git/hooks/pre-commit").is_symlink()
+    assert (root / ".git/hooks/pre-commit.d/10-security").is_symlink()
+    assert (
+        root / ".git/hooks/pre-commit.d/10-security"
+    ).resolve() == root / ".security/hooks/pre-commit"
+    pushed = git(root, "push", "test", "HEAD:refs/heads/main")
+    assert "Checking " not in pushed
+    assert git(root, "--git-dir", str(remote), "rev-parse", "refs/heads/main") == git(
+        root, "rev-parse", "HEAD"
+    )
 
 
-def exercise_mode(
+def exercise_mode(  # noqa: PLR0915 -- ordered installation and hook integration checkpoints
     mode: str,
     work: Path,
     wheels: dict[str, Wheel],
@@ -238,6 +251,10 @@ def exercise_mode(
     run([cli, "setup", root, "--github-actions"], cwd=work)
     record = json.loads((root / ".security/install-manifest.json").read_bytes())
     assert record["status"] == "ready"
+    assert not (root / ".security/hooks/pre-push").exists()
+    extra = root / ".git/hooks/pre-commit.d/20-project-checks"
+    extra.write_text("#!/bin/sh\necho independent-hook-ran >&2\n", encoding="utf-8")
+    extra.chmod(0o755)
     before = configuration_snapshot(root)
     run([cli, "setup", root], cwd=work, offline=True)
     assert configuration_snapshot(root) == before
@@ -245,16 +262,21 @@ def exercise_mode(
     run([cli, "doctor", root], cwd=work, offline=True)
     assert metadata_snapshot(root) == before
     check_hooks(cli, root, work / (mode + "-remote.git"))
-    log(f"PASS {mode}: setup/preview/repeat/doctor, staged commit and intermediate push protection")
+    log(f"PASS {mode}: setup/preview/repeat/doctor, guarded commit and manual history scan")
     clone = work / (mode + " 独立克隆")
     git(work, "clone", "-q", str(root), str(clone))
     assert not (clone / ".security/install-manifest.json").exists()
-    run([env / "bin/python", "-B", clone / ".security/setup.py", "--install-hooks"], cwd=clone)
+    run([clone / ".security/setup.sh"], cwd=clone)
     run([cli, "doctor", clone], cwd=work, offline=True)
     before = configuration_snapshot(clone)
-    run([env / "bin/python", "-B", clone / ".security/setup.py"], cwd=clone, offline=True)
+    run([clone / ".security/setup.sh"], cwd=clone, offline=True)
     assert configuration_snapshot(clone) == before
-    assert git(clone, "config", "--get", "core.hooksPath") == ".security/hooks"
+    assert not (clone / ".git/hooks/pre-commit").is_symlink()
+    assert (clone / ".git/hooks/pre-commit.d/10-security").is_symlink()
+    assert (
+        clone / ".git/hooks/pre-commit.d/10-security"
+    ).resolve() == clone / ".security/hooks/pre-commit"
+    assert run(["git", "config", "--get", "core.hooksPath"], cwd=clone, expected=1).stdout == ""
     log(f"PASS {mode}: standalone clone installation and repeat preserve active hooks")
     scanner = run(
         [
@@ -271,6 +293,8 @@ def exercise_mode(
     result["gitleaks"] = run([root / ".security/bin/gitleaks", "version"], cwd=work).stdout.strip()
     result["gitleaks_provenance"] = record["gitleaks"]
     result["standalone_clone"] = "passed"
+    result["automatic_hook"] = "pre-commit"
+    result["pre_push_hook_absent"] = True
     result["checks"] = "passed"
     return result
 

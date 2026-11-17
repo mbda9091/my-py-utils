@@ -29,6 +29,7 @@ Use `uv` for all dependency and environment operations.
 Do not manually activate `.venv`. Prefer:
 
 ```bash
+make dev
 uv sync --all-groups --all-packages
 uv run pytest tests/test_repo_security*.py
 uv run ruff check .
@@ -36,6 +37,10 @@ uv run ruff format .
 uv run pyright
 uv build --all-packages
 ```
+
+Use `make dev` to initialize a fresh clone: it configures repository security
+checks and Git hooks before syncing workspace dependencies. Direct `uv sync`
+only manages workspace dependencies.
 
 The pytest command above is an example for one package; select tests according
 to the rules below. Do not run the entire test suite by default.

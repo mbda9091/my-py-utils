@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 ERROR_EXIT = 2
-EXPECTED_RESTORED_STATUS = 1
 
 
 def snapshot(root: Path) -> dict[str, tuple[bytes, int, int]]:
@@ -158,10 +157,12 @@ def test_failed_install_retains_incomplete_state_and_retry_succeeds(
     record = manage.read_record(repository)
     assert record
     assert record["status"] == "incomplete"
-    assert (
-        git(repository, "config", "--get", "core.hooksPath", check=False).returncode
-        == EXPECTED_RESTORED_STATUS
-    )
+    assert manage.hooks_enabled(repository, manage.hooks_state(repository))
+    (repository / "sample.py").write_text("print('safe')\n")
+    git(repository, "add", "sample.py")
+    blocked = git(repository, "commit", "-qm", "Unready install must block", check=False)
+    assert blocked.returncode != 0
+    assert git(repository, "rev-parse", "--verify", "HEAD", check=False).returncode != 0
     assert not (repository / ".git/repo-security-setup.lock").exists()
     before = (repository / ".security/scan.py").stat().st_mtime_ns
 
@@ -190,7 +191,7 @@ def test_failed_repair_keeps_existing_protection(
     monkeypatch.setattr(manage, "install_runtime", fail)
     with pytest.raises(OSError, match="repair failure"):
         setup_repository(repository)
-    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == manage.HOOKS_PATH
+    assert manage.hooks_enabled(repository, manage.hooks_state(repository))
     assert fake_install == [repository]
 
 
@@ -212,6 +213,7 @@ def test_activation_failure_restores_original_local_setting(
     fake_install: list[Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
     original = manage.hooks_state
     calls = 0
 
@@ -220,7 +222,7 @@ def test_activation_failure_restores_original_local_setting(
         calls += 1
         actual = original(root)
         # Fail only the post-write effective-value check, while local config remains ours.
-        if actual.local == (manage.HOOKS_PATH,) and calls > 1:
+        if not actual.local and calls > 1:
             return manage.HooksState(actual.local, ".blocked-by-command-config", "command line:")
         return actual
 
@@ -228,10 +230,10 @@ def test_activation_failure_restores_original_local_setting(
     with pytest.raises(RepoSecurityError, match="did not take effect"):
         setup_repository(repository)
     assert (
-        git(repository, "config", "--local", "--get", "core.hooksPath", check=False).returncode
-        == EXPECTED_RESTORED_STATUS
+        git(repository, "config", "--local", "--get", "core.hooksPath").stdout.strip()
+        == manage.HOOKS_PATH
     )
-    assert fake_install == [repository]
+    assert not fake_install
 
 
 def test_setup_lock_blocks_concurrent_install_and_is_released(
@@ -381,7 +383,7 @@ def test_bare_and_linked_worktree_are_rejected(repository: Path, tmp_path: Path)
     assert not (worktree / ".security").exists()
 
 
-def test_final_manifest_failure_restores_newly_activated_hooks(
+def test_final_manifest_failure_keeps_commit_protection_active(
     repository: Path,
     fake_install: list[Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -400,10 +402,7 @@ def test_final_manifest_failure_restores_newly_activated_hooks(
     monkeypatch.setattr(manage, "save_record", save)
     with pytest.raises(OSError, match="manifest disk failure"):
         setup_repository(repository)
-    assert (
-        git(repository, "config", "--get", "core.hooksPath", check=False).returncode
-        == EXPECTED_RESTORED_STATUS
-    )
+    assert manage.hooks_enabled(repository, manage.hooks_state(repository))
     record = manage.read_record(repository)
     assert record
     assert record["status"] == "incomplete"
@@ -419,16 +418,31 @@ def test_post_activation_concurrent_hook_value_is_not_rolled_back(
 
     def state(root: Path) -> manage.HooksState:
         actual = original(root)
-        if actual.local == (manage.HOOKS_PATH,):
+        if (root / manage.HOOK_ENTRY).is_file() and actual.effective is None:
             git(root, "config", "core.hooksPath", ".concurrent")
             return original(root)
         return actual
 
     monkeypatch.setattr(manage, "hooks_state", state)
-    with pytest.raises(RepoSecurityError, match="did not take effect"):
+    with pytest.raises(RepoSecurityError, match="changed during setup"):
         setup_repository(repository)
     assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == ".concurrent"
-    assert fake_install == [repository]
+    assert not fake_install
+
+
+def test_hook_removal_during_install_is_not_marked_ready(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def remove_hooks(root: Path, _record: manage.InstallRecord) -> None:
+        (root / manage.HOOK_LINK).unlink()
+
+    monkeypatch.setattr(manage, "install_runtime", remove_hooks)
+    with pytest.raises(RepoSecurityError, match="hooks changed during installation"):
+        setup_repository(repository)
+    record = manage.read_record(repository)
+    assert record
+    assert record["status"] == "incomplete"
 
 
 def test_damaged_binary_is_not_executed_by_doctor(
