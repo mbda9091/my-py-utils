@@ -176,7 +176,8 @@ def test_linux_inherited_acl_is_masked(tmp_path: Path) -> None:
             (32, 0xFFFFFFFF),
         )
     )
-    os.setxattr(tmp_path, "system.posix_acl_default", default_acl)
+    if sys.platform == "linux":
+        os.setxattr(tmp_path, "system.posix_acl_default", default_acl)
     with private_temp_directory(tmp_path) as directory:
         write_private(directory / "key", b"fixture")
         assert stat.S_IMODE(directory.stat().st_mode) == stat.S_IRWXU

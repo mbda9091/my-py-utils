@@ -4,8 +4,10 @@ Install repository-local Gitleaks, Semgrep and Presidio scanners with uv.
 The CLI provides setup, read-only planning, repeat installation, recovery,
 diagnostics, manual scanning and optional GitHub Actions. This release is
 validated on **Linux x64** (Ubuntu 22.04.5 userland, glibc 2.35, WSL2 Linux
-kernel in the acceptance environment). macOS, Linux arm64 and native Windows
-have not been accepted for this release; macOS verification was explicitly deferred.
+kernel in the acceptance environment). Native **macOS arm64** acceptance,
+including the exact host and Python combinations, is recorded in
+[the macOS validation record](../../docs/repo-security-macos-validation.md).
+Intel macOS, Linux arm64 and native Windows have not been accepted for this release.
 Retained download checksums for other platforms are not evidence of support.
 
 From this workspace, use `uv sync --all-groups --all-packages`, then:

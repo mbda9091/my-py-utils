@@ -1,4 +1,4 @@
-"""Exercise built wheels on a real Linux host; use only disposable local Git remotes."""
+"""Exercise built wheels on Linux/macOS; use only disposable local Git remotes."""
 
 from __future__ import annotations
 
@@ -246,6 +246,16 @@ def exercise_mode(
     assert metadata_snapshot(root) == before
     check_hooks(cli, root, work / (mode + "-remote.git"))
     log(f"PASS {mode}: setup/preview/repeat/doctor, staged commit and intermediate push protection")
+    clone = work / (mode + " 独立克隆")
+    git(work, "clone", "-q", str(root), str(clone))
+    assert not (clone / ".security/install-manifest.json").exists()
+    run([env / "bin/python", "-B", clone / ".security/setup.py", "--install-hooks"], cwd=clone)
+    run([cli, "doctor", clone], cwd=work, offline=True)
+    before = configuration_snapshot(clone)
+    run([env / "bin/python", "-B", clone / ".security/setup.py"], cwd=clone, offline=True)
+    assert configuration_snapshot(clone) == before
+    assert git(clone, "config", "--get", "core.hooksPath") == ".security/hooks"
+    log(f"PASS {mode}: standalone clone installation and repeat preserve active hooks")
     scanner = run(
         [
             root / ".security/.venv/bin/python",
@@ -259,6 +269,8 @@ def exercise_mode(
     )
     result["scanners"] = json.loads(scanner.stdout)
     result["gitleaks"] = run([root / ".security/bin/gitleaks", "version"], cwd=work).stdout.strip()
+    result["gitleaks_provenance"] = record["gitleaks"]
+    result["standalone_clone"] = "passed"
     result["checks"] = "passed"
     return result
 
@@ -273,9 +285,21 @@ def main() -> int:
     parser.add_argument(
         "--python", default=sys.executable, help="Interpreter for both isolated CLI environments"
     )
+    parser.add_argument(
+        "--uv", type=Path, help="Use this installed uv binary for all installation subprocesses"
+    )
     args = parser.parse_args()
-    assert platform.system() == "Linux", "This acceptance targets Linux"
-    assert platform.machine() == "x86_64", "This acceptance targets x64"
+    assert (platform.system(), platform.machine()) in {
+        ("Linux", "x86_64"),
+        ("Darwin", "arm64"),
+        ("Darwin", "x86_64"),
+    }, "This acceptance targets Linux x64 or native macOS x64/arm64"
+    if args.uv is not None:
+        binary = args.uv.resolve()
+        assert binary.name == "uv"
+        assert binary.is_file()
+        assert os.access(binary, os.X_OK)
+        os.environ["PATH"] = str(binary.parent) + os.pathsep + os.environ.get("PATH", "")
     uv = shutil.which("uv")
     assert uv is not None
     output = args.output.resolve()
@@ -289,6 +313,11 @@ def main() -> int:
         "machine": platform.machine(),
         "libc": platform.libc_ver(),
         "kernel": platform.release(),
+        "macos": platform.mac_ver()[0],
+        "source_commit": git(source, "rev-parse", "HEAD"),
+        "acceptance_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "lock_sha256": hashlib.sha256((source / "uv.lock").read_bytes()).hexdigest(),
+        "constraints_sha256": hashlib.sha256(args.constraints.read_bytes()).hexdigest(),
         "uv": run([uv, "--version"], cwd=output).stdout.strip(),
         "wheels": {
             x.path.name: hashlib.sha256(x.path.read_bytes()).hexdigest() for x in wheels.values()
@@ -307,7 +336,7 @@ def main() -> int:
         (output / "result.json").write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-    log("PASS all Linux acceptance modes; evidence written to result.json")
+    log(f"PASS all {platform.system()} acceptance modes; evidence written to result.json")
     return 0
 
 
