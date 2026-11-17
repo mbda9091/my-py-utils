@@ -54,10 +54,13 @@ links, directories and non-executable files are errors. Other hook types, such a
 `commit-msg`, remain separate files in `.git/hooks/`. A tool that overwrites
 `.git/hooks/pre-commit` replaces the dispatcher and needs explicit integration.
 
-Same-version setup recognizes unchanged resources with or without an installation
-manifest, preserves their modification times and unrelated files, and reuses
-verified dependencies. Custom rules and different-version templates are reported
-as conflicts without replacement. There is no force, upgrade or uninstall option.
+Setup recognizes unchanged resources with or without an installation manifest,
+preserves their modification times and unrelated files, and reuses verified
+dependencies. Supported schema-1, version-0.2.0 installations are migrated
+automatically. The CLI replaces older runtime files only when their bytes still
+match the recorded installation. Existing registered repository rules are kept.
+Unregistered custom files, unsupported versions and corrupt records remain
+conflicts; there is no force or uninstall option.
 **M1 installations are not automatically upgraded to 0.2.0**: review the diff and
 migrate intentionally, or install into a fresh repository.
 
@@ -118,13 +121,24 @@ The standalone installer uses the same stdlib installation engine as the CLI.
 A clone without the local manifest adopts its reviewed on-disk files as its
 snapshot; it never replaces source files or downloads template updates. The CLI
 compares against its bundled release defaults, so custom snapshots remain visible
-as differences. Existing installations need an intentional migration: review the
-updated runtime, remove the old managed `.security/hooks/pre-push`, back up the
-ignored local installation manifest, then run the standalone installer to adopt
-the reviewed files. Setup refuses a legacy pre-push hook or stale registration
-instead of silently retaining duplicate scanning. Standalone setup without
+as differences. After pulling updated security files, run the same project
+initialization command (`make dev` here). The standalone installer renews local
+registration only for files matching both Git HEAD and the index, or the approved
+targets of an interrupted migration. Uncommitted working or staged edits stop
+setup. It recognizes exact shipped older dispatchers and removes only the
+registered, unchanged built-in legacy pre-push hook. Other checks are preserved.
+
+Before changing a managed installation, setup automatically saves its old record,
+affected files, owned entry point and original local hook settings under
+`.git/repo-security-backups/upgrade-*/`. This location is private and never part of
+a commit. Interrupted migrations retain their original backup and can be retried
+with the same command; persistent errors keep commits blocked. A shell guard
+checks the setup lock before invoking Python, including during runtime updates.
+No full filesystem or dependency rollback is promised. Unknown or modified hooks
+are never silently replaced. Standalone setup without
 `--install-hooks` is an advanced tools-only Python entry point that verifies tools and
-leaves Git settings unchanged (used by CI). Do not commit the installation manifest,
+leaves Git settings unchanged (used by CI); migrating an older installation
+requires the normal hook-enabled entry point. Do not commit the installation manifest,
 virtual environment or binaries.
 
 `scan` defaults to `staged`; `head` scans HEAD, and `history` scans locally

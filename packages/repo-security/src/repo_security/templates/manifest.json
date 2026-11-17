@@ -114,7 +114,7 @@
       "source_sha256": null,
       "resource": "manage.py",
       "destination": ".security/manage.py",
-      "sha256": "9e4b0868239af2a04acf80dae8e307e618019766c049aa10c46b695cb91de5d9",
+      "sha256": "b758a4a4c6b97af6774434b6d3c6ad6d37714e7d0a3581f9af906550e4d12a81",
       "executable": false
     }
   ]

@@ -211,6 +211,89 @@ def check_hooks(cli: Path, root: Path, remote: Path) -> None:
     )
 
 
+def check_managed_upgrade(  # noqa: PLR0915 -- model two real upgrade entry points and verify preservation
+    cli: Path, root: Path, mode: str
+) -> dict[str, str]:
+    golden = Path(__file__).parent / "fixtures/repo-security"
+    record_path = root / ".security/install-manifest.json"
+    record = json.loads(record_path.read_bytes())
+    policy = root / ".security/policy.json"
+    policy.write_bytes(policy.read_bytes() + b"\n")
+    preserved_policy = policy.read_bytes()
+    record["files"][".security/policy.json"]["installed_sha256"] = hashlib.sha256(
+        preserved_policy
+    ).hexdigest()
+    record["files"].pop(".security/setup.sh")
+    push_content = (golden / "legacy-pre-push.sh").read_bytes()
+    push_digest = hashlib.sha256(push_content).hexdigest()
+    record["files"][".security/hooks/pre-push"] = {
+        "template_sha256": push_digest,
+        "installed_sha256": push_digest,
+        "executable": True,
+    }
+    entry = root / ".git/hooks/pre-commit"
+    entry.write_bytes(
+        (
+            golden / ("dispatcher-early.sh" if mode == "single" else "dispatcher-late.sh")
+        ).read_bytes()
+    )
+    extra = root / ".git/hooks/pre-commit.d/20-project-checks"
+    preserved_extra = extra.read_bytes(), extra.stat().st_mtime_ns
+    if mode == "single":
+        (root / ".security/setup.sh").unlink()
+        old_push = root / ".security/hooks/pre-push"
+        old_push.write_bytes(push_content)
+        old_push.chmod(0o755)
+        for relative in (".security/manage.py", ".security/pii.py"):
+            path = root / relative
+            path.write_bytes(path.read_bytes() + b"\n# Earlier installed runtime\n")
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            record["files"][relative].update(template_sha256=digest, installed_sha256=digest)
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        old_record = record_path.read_bytes()
+        run([cli, "setup", root], cwd=root, offline=True)
+        case = "bundled-upgrade-of-owned-files"
+    else:
+        old_digest = (golden / "legacy-manager.sha256").read_text().strip()
+        record["files"][".security/manage.py"].update(
+            template_sha256=old_digest, installed_sha256=old_digest
+        )
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        old_record = record_path.read_bytes()
+        (root / "Makefile").write_bytes(
+            (Path(__file__).resolve().parents[1] / "Makefile").read_bytes()
+        )
+        (root / "pyproject.toml").write_text(
+            '[project]\nname = "security-upgrade-acceptance"\nversion = "0.0.0"\n'
+            'requires-python = ">=3.11"\n[tool.uv]\npackage = false\n'
+            "[tool.uv.workspace]\nmembers = []\n",
+            encoding="utf-8",
+        )
+        with (root / ".gitignore").open("a", encoding="utf-8") as stream:
+            stream.write("\n.venv/\n")
+        git(root, "config", "user.name", "Security Acceptance")
+        git(root, "config", "user.email", "test@example.com")
+        git(root, "add", ".")
+        # Model a pull of reviewed new files; the old local record is ignored by Git.
+        git(
+            root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "Pulled managed update fixture"
+        )
+        git(root, "config", "core.hooksPath", ".security/hooks")
+        run(["make", "dev"], cwd=root, offline=True)
+        case = "make-dev-after-pulling-new-runtime"
+    updated = json.loads(record_path.read_bytes())
+    backup = root / updated["migration_backup"]
+    assert updated["status"] == updated["phase"] == "ready"
+    assert (backup / "files/.security/install-manifest.json").read_bytes() == old_record
+    assert policy.read_bytes() == preserved_policy
+    assert preserved_extra == (extra.read_bytes(), extra.stat().st_mtime_ns)
+    assert not (root / ".security/hooks/pre-push").exists()
+    assert (root / ".security/setup.sh").is_file()
+    assert run(["git", "config", "--get", "core.hooksPath"], cwd=root, expected=1).stdout == ""
+    log(f"PASS {mode}: automatic managed upgrade ({case}), backup and independent checks preserved")
+    return {"case": case, "backup": updated["migration_backup"]}
+
+
 def check_python_repair(cli: Path, root: Path, mode: str) -> str:
     python = root / ".security/.venv/bin/python"
     if mode == "single":
@@ -292,6 +375,7 @@ def exercise_mode(  # noqa: PLR0915 -- ordered installation and hook integration
     extra = root / ".git/hooks/pre-commit.d/20-project-checks"
     extra.write_text("#!/bin/sh\necho independent-hook-ran >&2\n", encoding="utf-8")
     extra.chmod(0o755)
+    result["managed_upgrade"] = check_managed_upgrade(cli, root, mode)
     result["python_runtime_repair"] = check_python_repair(cli, root, mode)
     before = configuration_snapshot(root)
     run([cli, "setup", root], cwd=work, offline=True)
