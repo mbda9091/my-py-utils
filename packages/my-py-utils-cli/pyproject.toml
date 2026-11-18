@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "codex-hook-ctl",
+    "codex-session-export",
     "hello-cli",
     "mac-cache-cleaner",
     "node-modules-cleaner",
@@ -19,6 +20,7 @@ dependencies = [
 [project.scripts]
 private-pack = "private_pack.main:main"
 codex-hook-ctl = "codex_hook_ctl.cli:main"
+codex-session-export = "codex_session_export.main:main"
 hello-util = "hello_cli.main:main"
 mac-cache-cleaner = "mac_cache_cleaner:main"
 node-modules-cleaner = "node_modules_cleaner:main"
@@ -37,6 +39,7 @@ workspacectl = { workspace = true }
 codex-hook-ctl = { workspace = true }
 private-pack = { workspace = true }
 repo-security = { workspace = true }
+codex-session-export = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]

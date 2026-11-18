@@ -16,6 +16,7 @@ packages/
   private-pack/        Encrypted per-item 7z archives with a protected manifest
   repo-security/       Repository-local scanners, setup recovery and Git hooks
   codex-hook-ctl/      Record and inject custom Codex hooks by name
+  codex-session-export/ Export Codex sessions as normalized rollout JSONL
   workspacectl/         Controller for requirement and collaboration Git worktrees
   my-py-utils-cli/      Aggregate installer for all workspace CLI commands
 tests/                  Workspace-level tests
@@ -26,6 +27,10 @@ behind this layout.
 
 skill-sync 个人 GitHub 同步工具方案见
 [docs/skill-sync-design.md](docs/skill-sync-design.md)。
+
+Codex 会话导出：
+[方案文档](docs/codex-session-export-design.md) ·
+[实施文档](docs/codex-session-export-implementation.md)。
 
 ## Common Commands
 
@@ -40,6 +45,7 @@ uv run --package video2audio video2audio --help
 uv run --package mac-cache-cleaner mac-cache-cleaner --help
 uv run --package node-modules-cleaner node-modules-cleaner ~/Code --dry-run
 uv run --package codex-hook-ctl codex-hook-ctl --help
+uv run --package codex-session-export codex-session-export --directory ~/Code/my-py-utils --output ~/Downloads/codex-export
 uv run --package skill-sync skill-sync --help
 uv run --package workspacectl workspacectl --help
 uv run --package private-pack private-pack --help
@@ -98,6 +104,7 @@ video2audio
 mac-cache-cleaner
 node-modules-cleaner
 codex-hook-ctl
+codex-session-export
 skill-sync
 workspacectl
 private-pack

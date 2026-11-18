@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "codex-hook-ctl",
+    "codex-session-export",
     "hello-cli",
     "mac-cache-cleaner",
     "my-py-utils",
@@ -314,6 +315,11 @@ version = "0.1.0"
 source = { editable = "packages/codex-hook-ctl" }
 
 [[package]]
+name = "codex-session-export"
+version = "0.1.0"
+source = { editable = "packages/codex-session-export" }
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -500,6 +506,7 @@ version = "0.1.0"
 source = { editable = "packages/my-py-utils-cli" }
 dependencies = [
     { name = "codex-hook-ctl" },
+    { name = "codex-session-export" },
     { name = "hello-cli" },
     { name = "mac-cache-cleaner" },
     { name = "node-modules-cleaner" },
@@ -513,6 +520,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "codex-hook-ctl", editable = "packages/codex-hook-ctl" },
+    { name = "codex-session-export", editable = "packages/codex-session-export" },
     { name = "hello-cli", editable = "packages/hello-cli" },
     { name = "mac-cache-cleaner", editable = "packages/mac-cache-cleaner" },
     { name = "node-modules-cleaner", editable = "packages/node-modules-cleaner" },

@@ -15,6 +15,7 @@ Then run commands directly:
 
 ```bash
 codex-hook-ctl --help
+codex-session-export --help
 hello-util --help
 video2audio --help
 mac-cache-cleaner --help

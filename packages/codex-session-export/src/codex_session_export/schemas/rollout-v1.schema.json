@@ -1,0 +1,1561 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "codex-rollout-export-v1",
+  "$defs": {
+    "item": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "UserMessage"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "content": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "text"
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "image"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "url"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "localImage"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "path"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "skill"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "name",
+                      "path"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "content"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "AgentMessage"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "content": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "Text"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "text"
+                ],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "content"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Reasoning"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "summary_text": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "raw_content": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "summary_text",
+            "raw_content"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "CommandExecution"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "aggregated_output": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exit_code": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "secs": {
+                      "type": "number"
+                    },
+                    "nanos": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "secs",
+                    "nanos"
+                  ],
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "command",
+            "cwd",
+            "status"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "FileChange"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "changes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "add",
+                      "delete",
+                      "update"
+                    ]
+                  },
+                  "unified_diff": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "move_path": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "changes",
+            "status"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "McpToolCall"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "server": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "server",
+            "tool",
+            "status"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "DynamicToolCall"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tool": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "content_items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "tool",
+            "status"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ImageView"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ContextCompaction"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "CollabAgentToolCall"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tool": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "tool",
+            "status"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "SubAgentActivity"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "kind"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Extension"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "enum": [
+                "web.search",
+                "plan",
+                "sleep"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "kind"
+          ],
+          "additionalProperties": true,
+          "anyOf": [
+            {
+              "properties": {
+                "kind": {
+                  "const": "web.search"
+                },
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "query"
+              ]
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "plan"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "text"
+              ]
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "sleep"
+                },
+                "duration": {
+                  "type": "object",
+                  "properties": {
+                    "secs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "nanos": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "secs",
+                    "nanos"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "duration"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "ordinal": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "type": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "timestamp",
+    "ordinal",
+    "type",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_meta"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timestamp": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "timestamp"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "response_item"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "message"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "enum": [
+                    "user",
+                    "assistant",
+                    "developer",
+                    "system"
+                  ]
+                },
+                "content": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "input_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "output_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "summary_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "reasoning_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "input_image"
+                          },
+                          "image_url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "image_url"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "input_file"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "refusal"
+                          },
+                          "refusal": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "refusal"
+                        ],
+                        "additionalProperties": true
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "role",
+                "content"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "reasoning"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "input_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "output_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "summary_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "reasoning_text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "input_image"
+                          },
+                          "image_url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "image_url"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "input_file"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": true
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "const": "refusal"
+                          },
+                          "refusal": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "refusal"
+                        ],
+                        "additionalProperties": true
+                      }
+                    ]
+                  }
+                },
+                "content": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "input_text"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "text"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "output_text"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "text"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "summary_text"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "text"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "reasoning_text"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "text"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "input_image"
+                              },
+                              "image_url": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "image_url"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "input_file"
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "const": "refusal"
+                              },
+                              "refusal": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "refusal"
+                            ],
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "summary"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "function_call"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "arguments": {
+                  "type": "string"
+                },
+                "call_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "name",
+                "arguments",
+                "call_id"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "custom_tool_call"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "input": {
+                  "type": "string"
+                },
+                "call_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "name",
+                "input",
+                "call_id"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "function_call_output"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "output": {}
+              },
+              "required": [
+                "type",
+                "call_id",
+                "output"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "custom_tool_call_output"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "output": {}
+              },
+              "required": [
+                "type",
+                "call_id",
+                "output"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "additional_tools"
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {}
+                }
+              },
+              "required": [
+                "type",
+                "tools"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "agent_message"
+                },
+                "author": {},
+                "content": {}
+              },
+              "required": [
+                "type",
+                "content"
+              ],
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "event_msg"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "item_completed"
+                },
+                "thread_id": {
+                  "type": "string"
+                },
+                "turn_id": {
+                  "type": "string"
+                },
+                "item": {
+                  "$ref": "#/$defs/item"
+                },
+                "started_at_ms": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "completed_at_ms": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "thread_id",
+                "turn_id",
+                "item"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "task_started"
+                },
+                "turn_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "turn_id"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "task_complete"
+                },
+                "turn_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "turn_id"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "turn_aborted"
+                },
+                "turn_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "turn_id"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "token_count"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "thread_goal_updated"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "thread_settings_applied"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "user_message"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "agent_message"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "agent_reasoning"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "agent_reasoning_raw_content"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "context_compacted"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "warning"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "error"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "exec_command_begin"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "exec_command_end"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "mcp_tool_call_begin"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "mcp_tool_call_end"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "web_search_begin"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "web_search_end"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "patch_apply_begin"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "patch_apply_end"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "stream_error"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "session_configured"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "turn_diff"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "turn_context"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "compacted"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "token_usage_record"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "world_state"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "inter_agent_communication_metadata"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true
+    }
+  ]
+}

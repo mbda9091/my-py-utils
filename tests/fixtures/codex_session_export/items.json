@@ -1,0 +1,17 @@
+[
+  {"type":"userMessage","id":"user-1","content":[{"type":"text","text":"分析项目"}]},
+  {"type":"agentMessage","id":"agent-1","text":"正在检查","phase":"commentary"},
+  {"type":"commandExecution","id":"command-1","command":"ls","cwd":"/projects/demo","status":"completed","aggregatedOutput":"README.md\n","exitCode":0,"durationMs":12},
+  {"type":"fileChange","id":"file-1","status":"completed","changes":[{"path":"README.md","kind":{"type":"update"},"diff":"-old\n+new"}]},
+  {"type":"mcpToolCall","id":"mcp-1","server":"docs","tool":"search","status":"completed","arguments":{"query":"example"},"result":{"content":[{"type":"text","text":"found"}]},"error":null},
+  {"type":"dynamicToolCall","id":"dynamic-1","tool":"lookup","status":"completed","arguments":{"key":"x"},"contentItems":[{"type":"text","text":"result"}],"success":true},
+  {"type":"webSearch","id":"web-1","query":"example","action":{"type":"search","query":"example"},"results":[]},
+  {"type":"imageView","id":"image-1","path":"/projects/demo/image.png"},
+  {"type":"plan","id":"plan-1","text":"Inspect and report"},
+  {"type":"reasoning","id":"reason-1","summary":["Check the project structure"],"content":[]},
+  {"type":"contextCompaction","id":"compact-1"},
+  {"type":"collabAgentToolCall","id":"collab-1","tool":"spawn_agent","status":"completed","senderThreadId":"s","receiverThreadIds":["child"],"prompt":"Inspect","agentsStates":{}},
+  {"type":"subAgentActivity","id":"activity-1","kind":"spawned","agentThreadId":"child","agentPath":"/root/child"},
+  {"type":"sleep","id":"sleep-1","durationMs":10},
+  {"type":"agentMessage","id":"agent-2","text":"检查完成","phase":"final_answer"}
+]
