@@ -28,6 +28,51 @@ This template is injected by `workspacectl init` when a fresh workspace root doe
    workspacectl archive-requirement --task-root worktrees/<date>-<slug>
    ```
 
+## Choose a requirement branch
+
+New branches default to `<username>/feat/<slug>`, with no `merchant/` prefix.
+Both `create-requirement` and `extend-requirement` accept these naming flags:
+
+- `--git-username <username>` overrides the username. Without it, detection uses
+  global Git `user.name`, then the OS username. The selected username is sanitized.
+- `--branch-type <type>` accepts `feat`, `fix`, `refactor`, `docs`, `test`, or
+  `chore`; generated names default to `feat`.
+- `--branch <full-name>` overrides the complete Git branch name. Do not combine
+  it with `--git-username` or `--branch-type`, even `--branch-type feat`.
+
+The complete branch name is validated before any fetch or worktree mutations.
+Examples for a registered project `web`:
+
+```bash
+# mbda9091/feat/macos-web
+workspacectl create-requirement --title "macOS web" --project web \
+  --slug macos-web --git-username mbda9091
+# mbda9091/fix/web-startup
+workspacectl create-requirement --title "Fix web startup" --project web \
+  --slug web-startup --git-username mbda9091 --branch-type fix
+# mbda9091/refactor/plugin-loader
+workspacectl create-requirement --title "Refactor plugin loader" --project web \
+  --slug plugin-loader --git-username mbda9091 --branch-type refactor
+# mbda9091/chore/build-config
+workspacectl create-requirement --title "Build configuration" --project web \
+  --slug build-config --branch mbda9091/chore/build-config
+```
+
+## Extend or reuse a requirement
+
+```bash
+workspacectl extend-requirement --task-root worktrees/<date>-<slug> --add <id>
+```
+
+With no explicit naming flags, added worktrees use the recorded branch,
+including legacy `merchant/...` names. Explicit `--git-username`, `--branch-type`,
+or `--branch` applies only to added worktrees; no existing worktree or branch is
+renamed.
+
+For `create-requirement --reuse-existing`, omitting naming flags also preserves
+the recorded branch. A conflicting explicit naming request is rejected, not
+used to rename it. Reuse still requires matching slug, title, PRD URL, and scope.
+
 ## Join existing collaboration branches
 
 Use a collaboration task when the branches already exist on `origin` and are

@@ -14,8 +14,9 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from workspacectl.cli import main
+from workspacectl.cli import build_parser, main
 from workspacectl.core import (
+    BRANCH_TYPES,
     TASK_KIND_REQUIREMENT,
     WorkspaceController,
     WorkspaceError,
@@ -314,10 +315,16 @@ class WorkspaceControllerTests(unittest.TestCase):
             assert git_output("branch", "--show-current", cwd=beta_worktree) == (
                 "merchant/bob/search-api"
             )
-            assert git_output(
-                "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
-                cwd=alpha_worktree,
-            ) == "origin/feature/alice-search"
+            assert (
+                git_output(
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "--symbolic-full-name",
+                    "@{upstream}",
+                    cwd=alpha_worktree,
+                )
+                == "origin/feature/alice-search"
+            )
             assert (alpha_worktree / "AGENTS.local.md").resolve() == local_agents.resolve()
             agents = (alpha_worktree / ".workspace" / "AGENTS.md").read_text(encoding="utf-8")
             assert "collaboration `search-debug`" in agents
@@ -362,10 +369,16 @@ class WorkspaceControllerTests(unittest.TestCase):
             assert git_output("rev-parse", "HEAD", cwd=worktree) == git_output(
                 "rev-parse", f"origin/{branch}", cwd=worktree
             )
-            assert git_output(
-                "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
-                cwd=worktree,
-            ) == f"origin/{branch}"
+            assert (
+                git_output(
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "--symbolic-full-name",
+                    "@{upstream}",
+                    cwd=worktree,
+                )
+                == f"origin/{branch}"
+            )
 
     def test_create_collaboration_rolls_back_after_later_hook_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -541,9 +554,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             worktree.mkdir()
             code, out, _ = run_cli(root, "doctor", "--json")
             assert code == 1
-            assert "unregistered_worktree" in {
-                item["code"] for item in json.loads(out)["issues"]
-            }
+            assert "unregistered_worktree" in {item["code"] for item in json.loads(out)["issues"]}
 
     def test_cleanup_collaboration_protects_dirty_work_and_preserves_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -874,14 +885,14 @@ class WorkspaceControllerTests(unittest.TestCase):
                     git_executable,
                     "branch",
                     "--list",
-                    "merchant/merchant/merchant-search-flow",
+                    "merchant/feat/merchant-search-flow",
                 ],
                 cwd=str(src1),
                 check=True,
                 stdout=subprocess.PIPE,
                 text=True,
             ).stdout
-            assert "merchant/merchant/merchant-search-flow" in branch_list
+            assert "merchant/feat/merchant-search-flow" in branch_list
 
     def test_create_links_main_checkout_agents_local(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1180,13 +1191,13 @@ class WorkspaceControllerTests(unittest.TestCase):
             git_executable = shutil.which("git")
             assert git_executable is not None
             branch_list = subprocess.run(  # noqa: S603 - executable is resolved from PATH
-                [git_executable, "branch", "--list", "merchant/merchant/unarchived-cleanup"],
+                [git_executable, "branch", "--list", "merchant/feat/unarchived-cleanup"],
                 cwd=str(source),
                 check=True,
                 stdout=subprocess.PIPE,
                 text=True,
             ).stdout
-            assert "merchant/merchant/unarchived-cleanup" in branch_list
+            assert "merchant/feat/unarchived-cleanup" in branch_list
 
     def test_extend_requirement_add_and_remove(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1357,6 +1368,219 @@ class WorkspaceControllerTests(unittest.TestCase):
             assert (root / "AGENTS.md").read_text(
                 encoding="utf-8"
             ) == "# Usage Mode\n\nUse commands.\n"
+
+
+@pytest.mark.parametrize("branch_type", BRANCH_TYPES)
+def test_requirement_branch_types(tmp_path: Path, branch_type: str) -> None:
+    source = make_repo(tmp_path / "source")
+    configure_workspace_project(tmp_path, "alpha", source)
+    code, out, err = run_cli(
+        tmp_path,
+        "create-requirement",
+        "--title",
+        "Web startup",
+        "--slug",
+        "web-startup",
+        "--project",
+        "alpha",
+        "--git-username",
+        "mbda9091",
+        "--branch-type",
+        branch_type,
+        "--json",
+    )
+    assert code == 0, (out, err)
+    payload = json.loads(out)
+    expected = f"mbda9091/{branch_type}/web-startup"
+    assert payload["branch"] == expected
+    task_root = Path(payload["task_root"])
+    assert read_yaml(task_root / ".workspace" / "task.yaml")["branch"] == expected
+    assert git_output("branch", "--show-current", cwd=task_root / "alpha-web-startup") == expected
+
+
+def test_default_branch_and_username_detection(tmp_path: Path) -> None:
+    controller = WorkspaceController(tmp_path)
+    with patch("workspacectl.core.git_run", return_value="mbda9091"):
+        assert controller.resolve_requirement_branch("macos-web") == "mbda9091/feat/macos-web"
+    with (
+        patch("workspacectl.core.git_run", side_effect=WorkspaceError("unset")),
+        patch("workspacectl.core.getpass.getuser", return_value="local-user"),
+    ):
+        assert controller.resolve_requirement_branch("macos-web") == "local-user/feat/macos-web"
+    assert controller.branch_name(" Alice Smith ", "macos-web") == "Alice-Smith/feat/macos-web"
+    with pytest.raises(WorkspaceError, match="invalid branch type"):
+        controller.branch_name("alice", "macos-web", "invalid")
+
+
+@pytest.mark.parametrize("command", ["create-requirement", "extend-requirement"])
+def test_parser_rejects_unknown_branch_type(command: str) -> None:
+    required = (
+        ["--title", "Web", "--slug", "web", "--project", "alpha"]
+        if command == "create-requirement"
+        else ["--task-root", "worktrees/task", "--add", "alpha"]
+    )
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args([command, *required, "--branch-type", "unknown"])
+    assert exc.value.code == ARGPARSE_ERROR_EXIT_CODE
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--branch", "bad branch"],
+        ["--branch", ""],
+        ["--branch", "../escape"],
+        ["--branch", "-option"],
+        ["--branch", "release/custom", "--git-username", "alice"],
+        ["--branch", "release/custom", "--branch-type", "fix"],
+    ],
+)
+def test_invalid_branch_options_fail_before_mutation(tmp_path: Path, options: list[str]) -> None:
+    source = make_repo(tmp_path / "source")
+    configure_workspace_project(tmp_path, "alpha", source)
+    # Use equals syntax so leading dashes reach Git-name validation rather than argparse.
+    if options == ["--branch", "-option"]:
+        options = ["--branch=-option"]
+    with patch.object(WorkspaceController, "current_source_ref") as fetch:
+        code, out, err = run_cli(
+            tmp_path,
+            "create-requirement",
+            "--title",
+            "Web",
+            "--slug",
+            "web",
+            "--project",
+            "alpha",
+            *options,
+            "--json",
+        )
+    assert code == 1, (out, err)
+    assert json.loads(out)["ok"] is False
+    fetch.assert_not_called()
+    assert not (tmp_path / "worktrees").exists()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_custom_branch_survives_reuse_and_extension(tmp_path: Path, *, legacy: bool) -> None:
+    alpha = make_repo(tmp_path / "alpha-source")
+    beta = make_repo(tmp_path / "beta-source")
+    configure_workspace_projects(tmp_path, {"alpha": alpha, "beta": beta})
+    branch = "merchant/alice/web" if legacy else "release/custom-web"
+    argv = ["create-requirement", "--title", "Web", "--slug", "web", "--project", "alpha"]
+    code, out, err = run_cli(tmp_path, *argv, "--branch", branch, "--json")
+    assert code == 0, (out, err)
+    task_root = Path(json.loads(out)["task_root"])
+    manifest_path = task_root / ".workspace" / "task.yaml"
+    if legacy:
+        manifest = read_yaml(manifest_path)
+        manifest.pop("branch")
+        write_yaml(manifest_path, manifest)
+    code, out, err = run_cli(tmp_path, *argv, "--reuse-existing", "--json")
+    assert code == 0, (out, err)
+    assert json.loads(out)["branch"] == branch
+    before = manifest_path.read_bytes()
+    code, out, err = run_cli(
+        tmp_path,
+        *argv,
+        "--reuse-existing",
+        "--branch",
+        "different/branch",
+        "--json",
+    )
+    assert code == 1, (out, err)
+    assert "cannot change the branch" in json.loads(out)["error"]
+    assert manifest_path.read_bytes() == before
+    if legacy:
+        manifest = read_yaml(manifest_path)
+        manifest.pop("branch")
+        write_yaml(manifest_path, manifest)
+    code, out, err = run_cli(
+        tmp_path,
+        "extend-requirement",
+        "--task-root",
+        str(task_root),
+        "--add",
+        "beta",
+        "--json",
+    )
+    assert code == 0, (out, err)
+    assert json.loads(out)["branch"] == branch
+    assert git_output("branch", "--show-current", cwd=task_root / "beta-web") == branch
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        (["--branch", "release/override"], "release/override"),
+        (["--git-username", "mbda9091", "--branch-type", "chore"], "mbda9091/chore/web"),
+    ],
+)
+def test_extend_explicit_branch_only_changes_added_worktrees(
+    tmp_path: Path,
+    options: list[str],
+    expected: str,
+) -> None:
+    alpha = make_repo(tmp_path / "alpha-source")
+    beta = make_repo(tmp_path / "beta-source")
+    configure_workspace_projects(tmp_path, {"alpha": alpha, "beta": beta})
+    controller = WorkspaceController(tmp_path)
+    created = controller.create_requirement(
+        title="Web",
+        source_prd_url=None,
+        project_ids=["alpha"],
+        slug="web",
+        git_username="alice",
+    )
+    task_root = Path(created["task_root"])
+    code, out, err = run_cli(
+        tmp_path,
+        "extend-requirement",
+        "--task-root",
+        str(task_root),
+        "--add",
+        "beta",
+        *options,
+        "--json",
+    )
+    assert code == 0, (out, err)
+    assert json.loads(out)["branch"] == expected
+    assert git_output("branch", "--show-current", cwd=task_root / "alpha-web") == "alice/feat/web"
+    assert git_output("branch", "--show-current", cwd=task_root / "beta-web") == expected
+
+
+@pytest.mark.parametrize("delta", [["--add", "beta"], ["--remove", "alpha"]])
+def test_extend_rejects_invalid_branch_before_mutations(tmp_path: Path, delta: list[str]) -> None:
+    alpha = make_repo(tmp_path / "alpha-source")
+    beta = make_repo(tmp_path / "beta-source")
+    configure_workspace_projects(tmp_path, {"alpha": alpha, "beta": beta})
+    controller = WorkspaceController(tmp_path)
+    created = controller.create_requirement(
+        title="Web",
+        source_prd_url=None,
+        project_ids=["alpha"],
+        slug="web",
+        git_username="alice",
+    )
+    task_root = Path(created["task_root"])
+    manifest_path = task_root / ".workspace" / "task.yaml"
+    before = manifest_path.read_bytes()
+    with patch.object(WorkspaceController, "current_source_ref") as fetch:
+        code, out, err = run_cli(
+            tmp_path,
+            "extend-requirement",
+            "--task-root",
+            str(task_root),
+            *delta,
+            "--branch",
+            "bad branch",
+            "--json",
+        )
+    assert code == 1, (out, err)
+    assert "invalid Git branch name" in json.loads(out)["error"]
+    fetch.assert_not_called()
+    assert manifest_path.read_bytes() == before
+    assert (task_root / "alpha-web").is_dir()
+    assert not (task_root / "beta-web").exists()
 
 
 if __name__ == "__main__":

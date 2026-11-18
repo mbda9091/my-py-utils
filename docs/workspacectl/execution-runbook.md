@@ -53,6 +53,12 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 
 - 输入：requirement title、必填 slug、可选 PRD URL、显式初始 scope。
 - slug 只能使用小写 ASCII 字母、数字和单个连字符，且必须以字母或数字开头和结尾；不合规时直接拒绝。
+- 新 requirement 的默认 branch 为 `<username>/feat/<slug>`，不再添加 `merchant/` 前缀。
+- username 按 `--git-username`、全局 Git `user.name`、OS username 的顺序选取，并在生成 branch 前进行清洗。
+- `--branch-type` 可选 `feat`、`fix`、`refactor`、`docs`、`test`、`chore`；生成名称时默认 `feat`。
+- `--branch <完整分支名>` 直接指定完整 Git branch，与 `--git-username`、`--branch-type` 均互斥（包括显式 `--branch-type feat`）。
+- 在任何 fetch 或 worktree 变更之前，校验最终生成或显式指定的完整 Git branch 名；不合法时拒绝。
+- `--reuse-existing` 复用匹配 slug、title、PRD URL 和 scope 的活跃 task：未显式提供命名参数时保留 manifest 已记录的 branch，包括旧 `merchant/...` 名称；显式命名请求与记录冲突时拒绝，不重命名已有 branch。
 - 创建 task root。
 - 只校验显式 scope 中的 project；`workspace.json` 中未被选中的登记条目不会阻止本次创建。
 - 为 scope 内每个 project 准备 worktree。
@@ -61,6 +67,23 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 - 按项目类型自动识别并执行 worktree post-create hook；可用 `--project-type` 覆盖识别结果。
 - 写入活跃 task root 的 `.workspace/task.yaml`。
 - 返回 task root、worktree、branch 和 PRD URL（如有）的摘要。
+
+命名示例（`web` 为已登记的 project）：
+
+```bash
+# mbda9091/feat/macos-web
+workspacectl create-requirement --title "macOS web" --project web \
+  --slug macos-web --git-username mbda9091
+# mbda9091/fix/web-startup
+workspacectl create-requirement --title "Fix web startup" --project web \
+  --slug web-startup --git-username mbda9091 --branch-type fix
+# mbda9091/refactor/plugin-loader
+workspacectl create-requirement --title "Refactor plugin loader" --project web \
+  --slug plugin-loader --git-username mbda9091 --branch-type refactor
+# mbda9091/chore/build-config：完整名称覆盖
+workspacectl create-requirement --title "Build configuration" --project web \
+  --slug build-config --branch mbda9091/chore/build-config
+```
 
 ### 4. `create-collaboration`
 
@@ -87,6 +110,10 @@ workspace root 的 `AGENTS.md` 只负责当前工作方式的入口，不混进 
 - 输入：显式 scope delta。
 - 允许新增 project，也允许移除 project。
 - 新增 project 补 worktree。
+- 支持与 `create-requirement` 相同的 `--git-username`、`--branch-type` 和 `--branch` 参数、username 检测与清洗规则，以及完整 branch 名覆盖和互斥规则。
+- 未显式提供任何命名参数时，新增 worktree 保留 task 已记录的 branch，包括旧 `merchant/...` 名称，不按新默认格式重新生成。
+- 显式提供命名参数时，按 `<username>/<branch-type>/<slug>`（type 默认 `feat`）或完整 `--branch` 为本次新增 worktree 选择 branch；不影响已有 worktree，不重命名已有 branch。
+- 最终完整 branch 名在任何 fetch 或 worktree 变更（包括移除 worktree）之前校验。
 - 移除 project 立即删对应 worktree。
 - 同步更新 `.workspace/task.yaml`。
 - 只接受 requirement task；collaboration task 会在变更前被拒绝。

@@ -34,6 +34,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - fallback guard
 TASK_PROMPT_VERSION = "workspace-agent/v1"
 AGENT_MODES = ("usage", "development")
 DEFAULT_UPSTREAM = "HEAD"
+DEFAULT_BRANCH_TYPE = "feat"
+BRANCH_TYPES = ("feat", "fix", "refactor", "docs", "test", "chore")
 TASK_KIND_REQUIREMENT = "requirement"
 TASK_KIND_COLLABORATION = "collaboration"
 TASK_KINDS = (TASK_KIND_REQUIREMENT, TASK_KIND_COLLABORATION)
@@ -736,8 +738,44 @@ class WorkspaceController:
     def existing_worktree(self, repo_root: Path, target_path: Path) -> dict[str, str] | None:
         return git_worktree_entry(repo_root, target_path)
 
-    def branch_name(self, username: str, slug: str) -> str:
-        return f"merchant/{sanitize_segment(username)}/{slug}"
+    def branch_name(self, username: str, slug: str, branch_type: str = DEFAULT_BRANCH_TYPE) -> str:
+        if branch_type not in BRANCH_TYPES:
+            raise_workspace_error(
+                f"invalid branch type {branch_type!r}; choose from {', '.join(BRANCH_TYPES)}"
+            )
+        return f"{sanitize_segment(username)}/{branch_type}/{slug}"
+
+    def resolve_requirement_branch(
+        self,
+        slug: str,
+        *,
+        git_username: str | None = None,
+        branch_type: str | None = None,
+        branch: str | None = None,
+        manifest: dict[str, Any] | None = None,
+    ) -> str:
+        if branch is not None:
+            if git_username is not None or branch_type is not None:
+                raise_workspace_error(
+                    "--branch cannot be combined with --git-username or --branch-type"
+                )
+            return branch
+        if git_username is None and branch_type is None and manifest is not None:
+            recorded = manifest.get("branch")
+            if isinstance(recorded, str) and recorded:
+                return recorded
+            branches = {item["branch"] for item in manifest.get("worktrees", [])}
+            if len(branches) == 1:
+                return branches.pop()
+            if branches:
+                raise_workspace_error(
+                    "task has multiple branch names; specify --branch for added worktrees"
+                )
+        return self.branch_name(
+            self.detect_git_username(git_username),
+            slug,
+            DEFAULT_BRANCH_TYPE if branch_type is None else branch_type,
+        )
 
     # Rendering needs the complete task/repository context to keep generated guides accurate.
     def render_agents(  # noqa: PLR0913
@@ -996,6 +1034,8 @@ class WorkspaceController:
         slug: str,
         task_date: str | None = None,
         git_username: str | None = None,
+        branch_type: str | None = None,
+        branch: str | None = None,
         upstream: str | None = None,
         reuse_existing: bool = False,
         hook_options: HookOptions | None = None,
@@ -1036,7 +1076,6 @@ class WorkspaceController:
             task_root = self.task_root_path(task_date, slug)
             if task_root.exists():
                 raise_workspace_error(f"task root already exists: {task_root}")
-            ensure_dir(task_root / ".workspace")
             manifest = self.build_manifest(
                 title=title,
                 slug=slug,
@@ -1044,11 +1083,25 @@ class WorkspaceController:
                 scope=project_ids,
                 worktrees=[],
             )
-        username = self.detect_git_username(git_username)
-        branch = self.branch_name(username, slug)
+        branch = self.resolve_requirement_branch(
+            slug,
+            git_username=git_username,
+            branch_type=branch_type,
+            branch=branch,
+            manifest=manifest,
+        )
+        if collisions:
+            require_requirement_task(manifest, "create-requirement --reuse-existing")
+            recorded_branch = self.resolve_requirement_branch(slug, manifest=manifest)
+            if branch != recorded_branch:
+                raise_workspace_error(
+                    f"existing task branch is {recorded_branch!r}, not {branch!r}; "
+                    "--reuse-existing cannot change the branch"
+                )
         bindings: list[RepositoryBinding] = []
         for project_id in project_ids:
             binding = self.bind_repository(project_id)
+            validate_git_branch_name(binding.repo_root, branch)
             bindings.append(binding)
         worktrees: list[dict[str, Any]] = []
         hook_events: list[dict[str, Any]] = []
@@ -1116,6 +1169,7 @@ class WorkspaceController:
             scope=project_ids,
             worktrees=worktrees,
         )
+        manifest["branch"] = branch
         self.save_task_manifest(task_root, manifest)
         return {
             "workspace_root": str(self.root),
@@ -1250,6 +1304,8 @@ class WorkspaceController:
         add_ids: list[str],
         remove_ids: list[str],
         git_username: str | None = None,
+        branch_type: str | None = None,
+        branch: str | None = None,
         upstream: str | None = None,
         hook_options: HookOptions | None = None,
     ) -> dict[str, Any]:
@@ -1280,8 +1336,13 @@ class WorkspaceController:
                 raise_workspace_error(f"invalid repository id: {project_id}")
         if not add_set and not remove_set:
             raise_workspace_error("scope delta is empty after validation")
-        username = self.detect_git_username(git_username)
-        branch = self.branch_name(username, slug)
+        branch = self.resolve_requirement_branch(
+            slug,
+            git_username=git_username,
+            branch_type=branch_type,
+            branch=branch,
+            manifest=manifest,
+        )
         current_worktrees: dict[str, dict[str, Any]] = {
             item["project_id"]: item
             for item in cast("list[dict[str, Any]]", manifest.get("worktrees", []))
@@ -1309,10 +1370,15 @@ class WorkspaceController:
             entry_branch = entry.get("branch", branch)
             if not isinstance(entry_branch, str):
                 raise_workspace_error(f"invalid worktree branch for removed project {project_id}")
+            validate_git_branch_name(binding.repo_root, branch)
             removed_operations.append((binding, worktree_path, entry_branch))
+        for project_id in add_set:
+            binding = self.bind_repository(project_id)
+            validate_git_branch_name(binding.repo_root, branch)
+            bindings[project_id] = binding
         added_operations: list[tuple[str, RepositoryBinding, str, bool]] = []
         for project_id in add_set:
-            binding = bindings.get(project_id) or self.bind_repository(project_id)
+            binding = bindings[project_id]
             source_ref = self.current_source_ref(binding.repo_root, upstream)
             branch_preexisting = git_local_branch_exists(binding.repo_root, branch)
             added_operations.append((project_id, binding, source_ref, branch_preexisting))
@@ -1367,6 +1433,7 @@ class WorkspaceController:
             raise
         scope = [project_id for project_id in scope if project_id not in remove_set] + add_set
         worktrees = [current_worktrees[project_id] for project_id in scope]
+        manifest.setdefault("branch", branch)
         manifest["scope"] = scope
         manifest["worktrees"] = worktrees
         self.save_task_manifest(task_root, manifest)

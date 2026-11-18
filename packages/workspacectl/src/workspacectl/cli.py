@@ -5,12 +5,26 @@ import json
 import sys
 from typing import Any
 
-from .core import WorkspaceController, WorkspaceError
+from .core import BRANCH_TYPES, WorkspaceController, WorkspaceError
 from .hooks import DYNAMIC_VALUES, PROJECT_TYPES, HookOptions
 
 
 def add_common_output_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
+
+
+def add_branch_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--git-username", help="Override the branch username segment.")
+    parser.add_argument(
+        "--branch-type",
+        choices=BRANCH_TYPES,
+        help="Branch behavior type; defaults to feat for new tasks.",
+    )
+    parser.add_argument(
+        "--branch",
+        help="Use a complete branch name instead of <username>/<type>/<slug>; "
+        "cannot be combined with --git-username or --branch-type.",
+    )
 
 
 def add_task_root_arg(parser: argparse.ArgumentParser) -> None:
@@ -88,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Requirement slug: lowercase ASCII letters, digits, and hyphens.",
     )
     create_parser.add_argument("--task-date", help="Override the task-root date prefix.")
-    create_parser.add_argument("--git-username", help="Override the branch username segment.")
+    add_branch_args(create_parser)
     create_parser.add_argument(
         "--upstream",
         help="Upstream to fetch from origin; defaults to HEAD.",
@@ -130,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     extend_parser.add_argument(
         "--remove", action="append", default=[], dest="remove_ids", help="Project id to remove."
     )
-    extend_parser.add_argument("--git-username", help="Override the branch username segment.")
+    add_branch_args(extend_parser)
     extend_parser.add_argument(
         "--upstream",
         help="Upstream to fetch from origin; defaults to HEAD.",
@@ -328,6 +342,8 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
             slug=args.slug,
             task_date=args.task_date,
             git_username=args.git_username,
+            branch_type=args.branch_type,
+            branch=args.branch,
             upstream=args.upstream,
             reuse_existing=args.reuse_existing,
             hook_options=hook_options(args),
@@ -352,6 +368,8 @@ def run_command(  # noqa: C901, PLR0911, PLR0912, PLR0915
             add_ids=args.add_ids,
             remove_ids=args.remove_ids,
             git_username=args.git_username,
+            branch_type=args.branch_type,
+            branch=args.branch,
             upstream=args.upstream,
             hook_options=hook_options(args),
         )
