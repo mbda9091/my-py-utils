@@ -12,6 +12,7 @@ packages/
   hello-cli/            Small example CLI package
   video2audio/          CLI for extracting audio from video files with ffmpeg
   mac-cache-cleaner/    CLI for cleaning macOS build caches
+  system-alarm/         Python API and CLI for native macOS Clock alarms
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
   private-pack/        Encrypted per-item 7z archives with a protected manifest
   repo-security/       Repository-local scanners, setup recovery and Git hooks
@@ -32,6 +33,9 @@ Codex 会话导出：
 [方案文档](docs/codex-session-export-design.md) ·
 [实施文档](docs/codex-session-export-implementation.md)。
 
+macOS 原生闹钟（首次需要配置快捷指令）：
+[system-alarm 使用说明](<packages/system-alarm/README.md>)。
+
 ## Common Commands
 
 ```bash
@@ -50,6 +54,7 @@ uv run --package skill-sync skill-sync --help
 uv run --package workspacectl workspacectl --help
 uv run --package private-pack private-pack --help
 uv run --package repo-security repo-security --help
+uv run --package system-alarm system-alarm create --time 07:30 --label "起床"
 uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email registry@example.com
 ```
 
@@ -108,6 +113,7 @@ codex-session-export
 skill-sync
 workspacectl
 private-pack
+system-alarm
 ```
 
 Encrypted archive usage: [private-pack README](packages/private-pack/README.md).

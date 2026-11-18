@@ -19,6 +19,7 @@ members = [
     "private-pack",
     "repo-security",
     "skill-sync",
+    "system-alarm",
     "video2audio",
     "workspacectl",
 ]
@@ -513,6 +514,7 @@ dependencies = [
     { name = "private-pack" },
     { name = "repo-security" },
     { name = "skill-sync" },
+    { name = "system-alarm" },
     { name = "video2audio" },
     { name = "workspacectl" },
 ]
@@ -527,6 +529,7 @@ requires-dist = [
     { name = "private-pack", editable = "packages/private-pack" },
     { name = "repo-security", editable = "packages/repo-security" },
     { name = "skill-sync", editable = "packages/skill-sync" },
+    { name = "system-alarm", editable = "packages/system-alarm" },
     { name = "video2audio", editable = "packages/video2audio" },
     { name = "workspacectl", editable = "packages/workspacectl" },
 ]
@@ -918,6 +921,11 @@ wheels = [
 name = "skill-sync"
 version = "0.1.0"
 source = { editable = "packages/skill-sync" }
+
+[[package]]
+name = "system-alarm"
+version = "0.1.0"
+source = { editable = "packages/system-alarm" }
 
 [[package]]
 name = "texttable"

@@ -13,6 +13,7 @@ dependencies = [
     "private-pack",
     "repo-security",
     "skill-sync",
+    "system-alarm",
     "video2audio",
     "workspacectl",
 ]
@@ -25,6 +26,7 @@ hello-util = "hello_cli.main:main"
 mac-cache-cleaner = "mac_cache_cleaner:main"
 node-modules-cleaner = "node_modules_cleaner:main"
 skill-sync = "skill_sync.cli:main"
+system-alarm = "system_alarm.main:main"
 video2audio = "video2audio:main"
 workspacectl = "workspacectl.cli:main"
 repo-security = "repo_security.main:main"
@@ -40,6 +42,7 @@ codex-hook-ctl = { workspace = true }
 private-pack = { workspace = true }
 repo-security = { workspace = true }
 codex-session-export = { workspace = true }
+system-alarm = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]

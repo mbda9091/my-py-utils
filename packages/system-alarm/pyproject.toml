@@ -1,0 +1,14 @@
+[project]
+name = "system-alarm"
+version = "0.1.0"
+description = "Create native macOS Clock alarms through Shortcuts."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+system-alarm = "system_alarm.main:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"

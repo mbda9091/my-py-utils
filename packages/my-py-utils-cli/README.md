@@ -19,6 +19,7 @@ codex-session-export --help
 hello-util --help
 video2audio --help
 mac-cache-cleaner --help
+system-alarm --help
 node-modules-cleaner --help
 skill-sync --help
 workspacectl --help
