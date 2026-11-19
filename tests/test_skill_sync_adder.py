@@ -135,6 +135,85 @@ def test_add_needs_no_remote_identity_or_head(tmp_path: Path) -> None:
     assert not (config.repository_path / ".git" / "index").exists()
 
 
+@pytest.mark.parametrize("reference", ["../outside.txt", "../missing.txt", "alias/outside.txt"])
+def test_add_rejects_outward_relative_links_before_moving(tmp_path: Path, reference: str) -> None:
+    config = make_personal_config(tmp_path)
+    original = write_skill(tmp_path / "local")
+    (original.parent / "outside.txt").write_text("External reference")
+    (original / "alias").symlink_to(original.parent, target_is_directory=True)
+    link = original / "reference"
+    link.symlink_to(reference)
+
+    with pytest.raises(SkillSyncError, match="Relative symlink points outside"):
+        add_skill(original, config)
+
+    assert not original.is_symlink()
+    assert str(link.readlink()) == reference
+    assert (original.parent / "outside.txt").read_text() == "External reference"
+    assert not (config.repository_path / "skills" / original.name).exists()
+    assert not read_managed_installations(config.state_home)
+
+
+@pytest.mark.parametrize("reference", ["reference.txt", "nested/../reference.txt", "missing.txt"])
+def test_add_preserves_internal_relative_links(tmp_path: Path, reference: str) -> None:
+    config = make_personal_config(tmp_path)
+    original = write_skill(tmp_path / "local")
+    (original / "nested").mkdir()
+    (original / "reference.txt").write_text("Internal reference")
+    (original / "link").symlink_to(reference)
+
+    result = add_skill(original, config)
+
+    assert str((result.repository_path / "link").readlink()) == reference
+    if reference != "missing.txt":
+        assert (original / "link").read_text() == "Internal reference"
+    else:
+        assert not (original / "link").exists()
+
+
+def test_add_preserves_absolute_external_links(tmp_path: Path) -> None:
+    config = make_personal_config(tmp_path)
+    original = write_skill(tmp_path / "local")
+    external = tmp_path / "outside.txt"
+    external.write_text("External reference")
+    (original / "link").symlink_to(external)
+
+    result = add_skill(original, config)
+
+    assert (result.repository_path / "link").readlink() == external
+    assert (original / "link").read_text() == "External reference"
+
+
+def test_add_rejects_relative_escape_even_when_external_alias_resolves_back_inside(
+    tmp_path: Path,
+) -> None:
+    config = make_personal_config(tmp_path)
+    original = write_skill(tmp_path / "local")
+    (original.parent / "back").symlink_to(original, target_is_directory=True)
+    (original / "link").symlink_to("../back/SKILL.md")
+    assert (original / "link").resolve() == original / "SKILL.md"
+
+    with pytest.raises(SkillSyncError, match="Relative symlink points outside"):
+        add_skill(original, config)
+
+    assert not original.is_symlink()
+    assert (original / "link").is_file()
+
+
+def test_add_rejects_relative_symlink_cycle_without_moving(tmp_path: Path) -> None:
+    config = make_personal_config(tmp_path)
+    original = write_skill(tmp_path / "local")
+    (original / "one").symlink_to("two")
+    (original / "two").symlink_to("one")
+
+    with pytest.raises(SkillSyncError, match="Cannot resolve relative symlink"):
+        add_skill(original, config)
+
+    assert not original.is_symlink()
+    assert (original / "one").readlink().as_posix() == "two"
+    assert not (config.repository_path / "skills" / original.name).exists()
+
+
 def test_add_detects_edits_during_copy_and_preserves_latest_original(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

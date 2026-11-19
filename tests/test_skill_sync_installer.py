@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
@@ -8,9 +9,13 @@ from skill_sync.adder import add_skill
 from skill_sync.errors import SkillSyncError
 from skill_sync.installations import read_managed_installations
 from skill_sync.installer import install_skill
+from skill_sync.links import EntryState, link_directory
 from skill_sync.repository import init_repository
 
 from tests.skill_sync_helpers import make_personal_config, run_git, write_skill
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 
 def test_install_links_plain_skill_and_tracks_multiple_use_paths(tmp_path: Path) -> None:
@@ -169,21 +174,104 @@ def test_failed_rollback_keeps_original_link_backup(
     new = make_personal_config(tmp_path / "second")
     write_skill(new.repository_path / "skills")
     config = init_repository(new.repository_path, state_home=first.state_home)
-    original_rename = Path.rename
-
-    def fail_restore(path: Path, target: Path) -> Path:
-        if path.name == "original":
-            message = "restore failed"
-            raise OSError(message)
-        return original_rename(path, target)
-
-    monkeypatch.setattr(Path, "rename", fail_restore)
+    monkeypatch.setattr("skill_sync.links.os.link", Mock(side_effect=OSError("restore failed")))
     monkeypatch.setattr(Path, "symlink_to", Mock(side_effect=OSError("link failed")))
     with pytest.raises(SkillSyncError, match="Original data kept at"):
         install_skill("demo-skill", config, target="codex", target_root=root, force=True)
     backups = list(root.glob(".skill-sync-backup-*/original"))
     assert len(backups) == 1
     assert backups[0].readlink() == original
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_install_preserves_directory_created_after_initial_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, force: bool
+) -> None:
+    config = make_personal_config(tmp_path)
+    write_skill(config.repository_path / "skills")
+    root = tmp_path / "installed"
+    destination = root / "demo-skill"
+
+    def create_then_link(
+        path: Path, source: Path, *, expected: EntryState | None
+    ) -> AbstractContextManager[Path | None]:
+        path.mkdir(parents=True)
+        (path / "foreign.txt").write_text("Keep foreign data")
+        return link_directory(path, source, expected=expected)
+
+    monkeypatch.setattr("skill_sync.installer.link_directory", create_then_link)
+    with pytest.raises(SkillSyncError, match="Failed to link"):
+        install_skill("demo-skill", config, target="codex", target_root=root, force=force)
+    assert not destination.is_symlink()
+    assert (destination / "foreign.txt").read_text() == "Keep foreign data"
+    assert not read_managed_installations(config.state_home)
+
+
+@pytest.mark.parametrize("moment", ["before-helper", "during-rename"])
+def test_force_preserves_replacement_of_previously_verified_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moment: str
+) -> None:
+    old = make_personal_config(tmp_path / "old")
+    write_skill(old.repository_path / "skills")
+    root = tmp_path / "installed"
+    destination = install_skill("demo-skill", old, target="codex", target_root=root).path
+    new = make_personal_config(tmp_path / "new")
+    write_skill(new.repository_path / "skills")
+    config = init_repository(new.repository_path, state_home=old.state_home)
+    records_before = (config.state_home / "installations.json").read_bytes()
+
+    def replace() -> None:
+        destination.unlink()
+        destination.mkdir()
+        (destination / "foreign.txt").write_text("Keep replacement")
+
+    original_rename = Path.rename
+
+    def replace_then_rename(path: Path, target: Path) -> Path:
+        if path == destination:
+            replace()
+        return original_rename(path, target)
+
+    def replace_then_link(
+        path: Path, source: Path, *, expected: EntryState | None
+    ) -> AbstractContextManager[Path | None]:
+        replace()
+        return link_directory(path, source, expected=expected)
+
+    if moment == "during-rename":
+        monkeypatch.setattr(Path, "rename", replace_then_rename)
+    else:
+        monkeypatch.setattr("skill_sync.installer.link_directory", replace_then_link)
+    with pytest.raises(SkillSyncError, match="changed during operation"):
+        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+    assert not destination.is_symlink()
+    assert (destination / "foreign.txt").read_text() == "Keep replacement"
+    assert (config.state_home / "installations.json").read_bytes() == records_before
+
+
+def test_force_rollback_preserves_new_occupant_and_old_link_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = make_personal_config(tmp_path / "old")
+    old_skill = write_skill(old.repository_path / "skills")
+    root = tmp_path / "installed"
+    destination = install_skill("demo-skill", old, target="codex", target_root=root).path
+    new = make_personal_config(tmp_path / "new")
+    write_skill(new.repository_path / "skills")
+    config = init_repository(new.repository_path, state_home=old.state_home)
+    before = (config.state_home / "installations.json").read_bytes()
+
+    def create_occupant(path: Path, target: Path, *, target_is_directory: bool) -> None:
+        del target, target_is_directory
+        path.write_text("New occupant")
+        raise FileExistsError
+
+    monkeypatch.setattr(Path, "symlink_to", create_occupant)
+    with pytest.raises(SkillSyncError, match="Original data kept at"):
+        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+    assert destination.read_text() == "New occupant"
+    assert next(root.glob(".skill-sync-backup-*/original")).readlink() == old_skill
+    assert (config.state_home / "installations.json").read_bytes() == before
 
 
 def test_local_add_install_edit_reflects_in_git_diff_without_git_metadata_writes(

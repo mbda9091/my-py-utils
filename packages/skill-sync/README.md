@@ -70,6 +70,12 @@ SKILL.md files, nested Git metadata and unsupported special files are rejected.
 All local files are preserved, including caches and existing legacy metadata;
 `add` never generates or refreshes `skill-sync.json`.
 
+Relative symlinks must stay within the skill directory, including through link
+chains. Outward relative links (even dangling ones) are rejected before any move,
+because relocating the skill would change their meaning. Move the referenced
+content into the skill or make the reference absolute before retrying. Internal
+relative links and absolute links retain their stored targets.
+
 ## Install a personal skill
 
 ```bash
@@ -88,6 +94,17 @@ repository, `--force` can relink a previously registered personal installation
 only when its actual link still matches the recorded old source. Replaced or
 unresolved records do not authorize overwriting content. The old source files
 are never deleted by relinking.
+
+The destination is checked again before replacement and after moving the old
+link aside. Content appearing during installation causes a failure and is
+preserved. If restoring an old link would overwrite a new occupant, the original
+link stays in a reported backup for manual recovery.
+
+`init`, `add`, and `install` share a process lock in the state directory. Concurrent
+commands wait until the current read/modify/write operation, including rollback,
+finishes. Batch installation holds the lock for the batch. This prevents lost
+installation records and races with repository rebinding. The lock file remains
+on disk; the operating system releases the lock when a process exits.
 
 Batch installation continues after individual failures, prints installed/failed
 counts and returns a nonzero status if any skill failed. It only enumerates the

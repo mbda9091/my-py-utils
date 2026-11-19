@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING
 
 from skill_sync.adder import add_skill
 from skill_sync.catalog import list_local_skills
+from skill_sync.config import get_state_home
 from skill_sync.errors import LegacyConfigError, SkillSyncError
 from skill_sync.installations import installation_status, read_managed_installations
 from skill_sync.installer import install_skill
+from skill_sync.locking import mutation_lock
 from skill_sync.repository import init_repository, read_repository_config
 from skill_sync.validation import validate_local_skill
 
@@ -87,9 +89,11 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         output.write(f"description: {metadata.description}\n")
         output.write(f"path: {metadata.path}\n")
     elif command == "add":
-        _run_add(args.local_skill_dir, output)
+        with mutation_lock(get_state_home()):
+            _run_add(args.local_skill_dir, output)
     elif command == "install":
-        return _run_install(args, output, error_output)
+        with mutation_lock(get_state_home()):
+            return _run_install(args, output, error_output)
     else:
         msg = f"Unhandled command: {command}"
         raise SkillSyncError(msg)

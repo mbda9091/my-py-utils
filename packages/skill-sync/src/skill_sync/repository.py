@@ -19,6 +19,7 @@ from skill_sync.config import (
 )
 from skill_sync.errors import LegacyConfigError, SkillSyncError
 from skill_sync.installations import installations_payload, read_managed_installations
+from skill_sync.locking import mutation_lock
 
 INIT_HINT = "Run 'skill-sync init --repo <local-repo>' to configure a local repository."
 
@@ -32,6 +33,13 @@ class RepositoryConfig:
 def init_repository(repository_path: Path, *, state_home: Path | None = None) -> RepositoryConfig:
     home = (get_state_home() if state_home is None else state_home).expanduser().resolve()
     repository = repository_path.expanduser().resolve()
+    # Reject invalid locations before creating the state directory for the lock.
+    validate_repository(repository, home)
+    with mutation_lock(home):
+        return _init_repository(repository, home)
+
+
+def _init_repository(repository: Path, home: Path) -> RepositoryConfig:
     validate_repository(repository, home)
     path = config_path(home)
     existing = _read_payload(path) if path.exists() else None
@@ -76,6 +84,13 @@ def init_repository(repository_path: Path, *, state_home: Path | None = None) ->
             raise SkillSyncError(msg) from exc
         raise
     return config
+
+
+def require_current_binding(config: RepositoryConfig) -> None:
+    current = read_repository_config(config.state_home)
+    if current != config:
+        msg = "Personal repository binding changed. Reload configuration and retry."
+        raise SkillSyncError(msg)
 
 
 def _restore_file(path: Path, contents: bytes | None) -> None:

@@ -11,8 +11,15 @@ from skill_sync.installations import (
     symlink_target,
     write_managed_installations,
 )
-from skill_sync.links import link_directory, link_path, require_external_path
-from skill_sync.repository import RepositoryConfig, validate_repository
+from skill_sync.links import (
+    entry_state,
+    link_directory,
+    link_path,
+    require_entry,
+    require_external_path,
+)
+from skill_sync.locking import mutation_lock
+from skill_sync.repository import RepositoryConfig, require_current_binding
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,10 +38,22 @@ def install_skill(
     force: bool = False,
     target_root: Path | None = None,
 ) -> InstallResult:
+    with mutation_lock(config.state_home):
+        require_current_binding(config)
+        return _install_skill(name, config, target=target, force=force, target_root=target_root)
+
+
+def _install_skill(
+    name: str,
+    config: RepositoryConfig,
+    *,
+    target: str,
+    force: bool,
+    target_root: Path | None,
+) -> InstallResult:
     if target != "codex":
         msg = "Only --target codex is supported."
         raise SkillSyncError(msg)
-    validate_repository(config.repository_path, config.state_home)
     skill = find_local_skill(config.repository_path, name)
     skills_root = (Path.home() / ".agents" / "skills") if target_root is None else target_root
     destination = link_path(skills_root / name)
@@ -42,6 +61,7 @@ def install_skill(
     source = skill.path
     records = read_managed_installations(config.state_home)
     previous = records.get(str(destination))
+    expected = entry_state(destination)
     actual = symlink_target(destination)
     already_linked = actual == source
     same_skill = destination.is_symlink() and destination.resolve() == source
@@ -61,12 +81,14 @@ def install_skill(
             )
             msg = f"Target skill already exists: {destination}. {detail}"
             raise TargetSkillExistsError(msg)
+    require_entry(destination, expected)
     records[str(destination)] = ManagedInstallation(name, target, destination, source)
     try:
         if already_linked:
+            require_entry(destination, expected)
             write_managed_installations(records, config.state_home)
         else:
-            with link_directory(destination, source):
+            with link_directory(destination, source, expected=expected):
                 write_managed_installations(records, config.state_home)
     except OSError as exc:
         msg = f"Failed to link skill {destination}: {exc}"

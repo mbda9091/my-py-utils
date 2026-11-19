@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +17,9 @@ from skill_sync.installations import (
     symlink_target,
     write_managed_installations,
 )
-from skill_sync.links import link_directory, link_path, require_external_path
-from skill_sync.repository import RepositoryConfig, validate_repository
+from skill_sync.links import entry_state, link_directory, link_path, require_external_path
+from skill_sync.locking import mutation_lock
+from skill_sync.repository import RepositoryConfig, require_current_binding
 from skill_sync.validation import validate_local_skill
 
 
@@ -30,7 +32,12 @@ class AddResult:
 
 
 def add_skill(local_skill_dir: Path, config: RepositoryConfig) -> AddResult:
-    validate_repository(config.repository_path, config.state_home)
+    with mutation_lock(config.state_home):
+        require_current_binding(config)
+        return _add_skill(local_skill_dir, config)
+
+
+def _add_skill(local_skill_dir: Path, config: RepositoryConfig) -> AddResult:
     source = link_path(local_skill_dir)
     destination = personal_skill_path(config.repository_path, source.name).absolute()
     if source == destination:
@@ -69,6 +76,9 @@ def _move_and_link(source: Path, destination: Path, config: RepositoryConfig) ->
     recorded = False
     try:
         before = _tree_snapshot(source)
+        _validate_relative_links(source)
+        _assert_unchanged(source, before)
+        expected = entry_state(source)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".skill-sync-add-", dir=destination.parent) as temporary:
             staged = Path(temporary) / source.name
@@ -77,7 +87,7 @@ def _move_and_link(source: Path, destination: Path, config: RepositoryConfig) ->
             _assert_unchanged(staged, before)
             staged.rename(destination)
             installed = True
-            with link_directory(source, destination) as backup:
+            with link_directory(source, destination, expected=expected) as backup:
                 _assert_unchanged(backup, before)
                 write_managed_installations(records, config.state_home)
                 recorded = True
@@ -96,6 +106,7 @@ def _move_and_link(source: Path, destination: Path, config: RepositoryConfig) ->
 
 
 def _record_link(source: Path, destination: Path, config: RepositoryConfig) -> None:
+    expected = entry_state(source)
     records = read_managed_installations(config.state_home)
     target = (
         "codex"
@@ -110,8 +121,26 @@ def _record_link(source: Path, destination: Path, config: RepositoryConfig) -> N
     if symlink_target(source) == destination:
         write_managed_installations(records, config.state_home)
     else:
-        with link_directory(source, destination):
+        with link_directory(source, destination, expected=expected):
             write_managed_installations(records, config.state_home)
+
+
+def _validate_relative_links(root: Path) -> None:
+    for path in root.rglob("*"):
+        if not path.is_symlink() or path.readlink().is_absolute():
+            continue
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError) as exc:
+            msg = f"Cannot resolve relative symlink before moving skill: {path}"
+            raise SkillSyncError(msg) from exc
+        lexical_target = Path(os.path.normpath(path.parent / path.readlink()))
+        if not lexical_target.is_relative_to(root) or not resolved.is_relative_to(root):
+            msg = (
+                f"Relative symlink points outside the skill and would change after moving: {path}. "
+                "Use an absolute link or move the referenced content into the skill first."
+            )
+            raise SkillSyncError(msg)
 
 
 def _assert_unchanged(path: Path | None, expected: dict[str, tuple[object, ...]]) -> None:
