@@ -14,6 +14,7 @@ packages/
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   system-alarm/         Python API and CLI for native macOS Clock alarms
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
+  skill-sync/           Personal skill repository management and symlink installation
   private-pack/        Encrypted per-item 7z archives with a protected manifest
   repo-security/       Repository-local scanners, setup recovery and Git hooks
   codex-hook-ctl/      Record and inject custom Codex hooks by name

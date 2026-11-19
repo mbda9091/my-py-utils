@@ -1,7 +1,7 @@
 [project]
 name = "skill-sync"
 version = "0.1.0"
-description = "Personal Git-backed sync CLI for Codex skills."
+description = "Manage personal skills with a local Git repository and symlink installs."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

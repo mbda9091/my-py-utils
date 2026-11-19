@@ -9,7 +9,6 @@ from skill_sync.config import (
     LOCAL_SCHEMA_VERSION,
     atomic_write_json,
     config_path,
-    init_config,
     installations_path,
 )
 from skill_sync.errors import SkillSyncError
@@ -22,7 +21,12 @@ from skill_sync.installations import (
 from skill_sync.installer import install_skill
 from skill_sync.repository import init_repository
 
-from tests.skill_sync_helpers import make_local_repository, make_personal_config, write_skill
+from tests.skill_sync_helpers import (
+    make_local_repository,
+    make_personal_config,
+    write_legacy_config,
+    write_skill,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,8 +43,8 @@ def test_v1_config_and_multiple_use_paths_migrate_with_exact_backups(
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     state = tmp_path / "state"
-    old = init_config("git@example.com:me/skills.git", branch="main", state_home=state)
-    old_skill = write_skill(old.checkout / "skills")
+    old = write_legacy_config(state)
+    old_skill = write_skill(old / "skills")
     standard = home / ".agents/skills/demo-skill"
     standard.parent.mkdir(parents=True)
     standard.symlink_to(old_skill, target_is_directory=True)
@@ -133,7 +137,7 @@ def test_binding_failure_restores_config_and_records_together(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = tmp_path / "state"
-    init_config("git@example.com:me/skills.git", branch="main", state_home=state)
+    write_legacy_config(state)
     raw = json.dumps(
         {"codex:demo-skill": legacy_record(tmp_path / "installed/demo-skill")}
     ).encode()

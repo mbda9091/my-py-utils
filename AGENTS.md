@@ -14,7 +14,7 @@ packages/
   video2audio/          CLI for extracting audio from video files with ffmpeg
   mac-cache-cleaner/    CLI for cleaning macOS build caches
   node-modules-cleaner/ CLI for recursively deleting node_modules directories
-  skill-sync/           Git-backed personal skill registry sync CLI
+  skill-sync/           Local personal skill repository management and symlink installation
   repo-security/        Repository-local scanners, Git hooks, and installation diagnostics
 tests/                  Package-scoped tests stored centrally
 ```
@@ -106,13 +106,16 @@ Keep CLI packages thin:
 
 ## skill-sync Rules
 
-`skill-sync` publishes commits to a personal Git registry. Its publish path must
-use a registry-specific Git identity from configuration, not the machine's
-global Git identity. Keep `publish` fail-closed when this identity is missing.
+`skill-sync` binds one persistent local personal skill repository. It absorbs
+explicitly selected skills and installs them as symlinks, preserving unrelated
+skills in the client directory. Git staging, commits, branches, identity and
+remote synchronization belong to the user. The tool's only Git subprocess is
+a fixed read-only repository-root check; do not add generic Git execution or
+restore the removed `publish`/`sync` workflows.
 
-Publishing local skills runs privacy and safety checks. Avoid hard-coded local
-absolute paths such as `/Users/<name>/...` in publishable skill content; use
-`~`, `<vault-path>`, or another placeholder instead.
+Keep v1 configuration and installation-record support read-only until explicit
+migration. Back up old state, preserve unresolved provenance, and never use
+unknown or stale installation records to authorize overwriting local content.
 
 ## Code Quality
 

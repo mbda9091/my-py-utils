@@ -6,12 +6,11 @@ from unittest.mock import Mock
 import pytest
 from skill_sync.adder import add_skill
 from skill_sync.errors import SkillSyncError
-from skill_sync.git_repo import run_git
 from skill_sync.installations import read_managed_installations
 from skill_sync.installer import install_skill
 from skill_sync.repository import init_repository
 
-from tests.skill_sync_helpers import make_personal_config, write_skill
+from tests.skill_sync_helpers import make_personal_config, run_git, write_skill
 
 
 def test_install_links_plain_skill_and_tracks_multiple_use_paths(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@ from pathlib import Path
 from stat import S_IFMT, S_IMODE, S_ISDIR, S_ISLNK, S_ISREG
 from tempfile import TemporaryDirectory
 
-from skill_sync.catalog import find_local_skill, registry_skill_path
+from skill_sync.catalog import find_local_skill, personal_skill_path
 from skill_sync.config import atomic_write_bytes, installations_path
 from skill_sync.errors import SkillSyncError
 from skill_sync.installations import (
@@ -25,14 +25,14 @@ from skill_sync.validation import validate_local_skill
 class AddResult:
     name: str
     path: Path
-    registry_path: Path
+    repository_path: Path
     changed: bool
 
 
 def add_skill(local_skill_dir: Path, config: RepositoryConfig) -> AddResult:
     validate_repository(config.repository_path, config.state_home)
     source = link_path(local_skill_dir)
-    destination = registry_skill_path(config.repository_path, source.name).absolute()
+    destination = personal_skill_path(config.repository_path, source.name).absolute()
     if source == destination:
         find_local_skill(config.repository_path, source.name)
         return AddResult(source.name, source, destination, changed=False)

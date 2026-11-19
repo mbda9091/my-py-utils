@@ -9,15 +9,15 @@ import pytest
 from skill_sync.cli import main
 from skill_sync.config import (
     config_path,
-    init_config,
 )
-from skill_sync.git_repo import run_git
 from skill_sync.repository import read_repository_config
 
 from tests.skill_sync_helpers import (
+    make_committed_repository,
     make_local_repository,
     make_personal_config,
-    make_registry,
+    run_git,
+    write_legacy_config,
     write_skill,
 )
 
@@ -233,13 +233,13 @@ def test_cli_local_catalog_survives_dirty_branch_and_clone(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    registry = make_registry(tmp_path)
-    write_skill(registry.checkout / "skills")
-    run_git(["add", "skills"], cwd=registry.checkout)
-    run_git(["commit", "-m", "Add skill manually"], cwd=registry.checkout)
-    run_git(["push"], cwd=registry.checkout)
+    registry = make_committed_repository(tmp_path)
+    write_skill(registry.path / "skills")
+    run_git(["add", "skills"], cwd=registry.path)
+    run_git(["commit", "-m", "Add skill manually"], cwd=registry.path)
+    run_git(["push"], cwd=registry.path)
     clone = tmp_path / "clone"
-    run_git(["clone", registry.repository, str(clone)], cwd=None)
+    run_git(["clone", str(registry.remote), str(clone)], cwd=None)
     monkeypatch.setenv("SKILL_SYNC_HOME", str(tmp_path / "local-state"))
     assert main(["init", "--repo", str(clone)]) == 0
     capsys.readouterr()
@@ -265,7 +265,7 @@ def test_cli_legacy_status_and_list_require_explicit_migration(
 ) -> None:
     state = tmp_path / "state"
     monkeypatch.setenv("SKILL_SYNC_HOME", str(state))
-    init_config("git@example.com:me/skills.git", branch="main")
+    write_legacy_config(state)
     original = config_path(state).read_bytes()
 
     assert main(["status"]) == 0

@@ -8,14 +8,13 @@ import pytest
 from skill_sync.adder import add_skill
 from skill_sync.catalog import list_local_skills
 from skill_sync.errors import SkillSyncError
-from skill_sync.git_repo import run_git
 from skill_sync.installations import (
     ManagedInstallation,
     read_managed_installations,
     write_managed_installations,
 )
 
-from tests.skill_sync_helpers import make_personal_config, write_skill
+from tests.skill_sync_helpers import make_personal_config, run_git, write_skill
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +34,7 @@ def test_add_moves_complete_skill_links_original_and_does_not_commit(tmp_path: P
     destination = config.repository_path / "skills" / "demo-skill"
     assert result.changed
     assert result.path == original
-    assert result.registry_path == destination
+    assert result.repository_path == destination
     assert original.is_symlink()
     assert original.resolve() == destination
     assert not destination.is_symlink()
@@ -206,7 +205,7 @@ def test_add_rejects_repository_ancestor_without_copying_it(tmp_path: Path) -> N
     container = tmp_path / "container"
     config = make_personal_config(container)
     (container / "SKILL.md").write_text("---\nname: container\ndescription: Demo\n---\n")
-    with pytest.raises(SkillSyncError, match="outside the registry"):
+    with pytest.raises(SkillSyncError, match="outside the personal repository"):
         add_skill(container, config)
     assert (container / "SKILL.md").is_file()
     assert config.repository_path.is_dir()

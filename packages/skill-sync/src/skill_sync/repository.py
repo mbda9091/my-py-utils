@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -13,10 +15,9 @@ from skill_sync.config import (
     config_path,
     get_state_home,
     installations_path,
-    read_config,
+    legacy_repository_path,
 )
 from skill_sync.errors import LegacyConfigError, SkillSyncError
-from skill_sync.git_repo import run_git
 from skill_sync.installations import installations_payload, read_managed_installations
 
 INIT_HINT = "Run 'skill-sync init --repo <local-repo>' to configure a local repository."
@@ -40,7 +41,7 @@ def init_repository(repository_path: Path, *, state_home: Path | None = None) ->
         version = existing.get("schemaVersion")
         if type(version) is int and version == 1:
             # Validate the old format before preserving it; a URL is never a local path.
-            legacy_repository = read_config(home).checkout.expanduser().absolute()
+            legacy_repository = legacy_repository_path(existing)
         else:
             current = _config_from_payload(existing, home)
             if current.repository_path == repository:
@@ -106,17 +107,7 @@ def validate_repository(repository: Path, state_home: Path) -> None:
     if not repository.is_dir():
         msg = f"Local repository directory does not exist: {repository}"
         raise SkillSyncError(msg)
-    inside = run_git(
-        ["--no-optional-locks", "rev-parse", "--is-inside-work-tree"],
-        cwd=repository,
-    ).strip()
-    if inside != "true":
-        msg = f"Personal repository must be a Git working directory: {repository}"
-        raise SkillSyncError(msg)
-    root = run_git(
-        ["--no-optional-locks", "rev-parse", "--show-toplevel"],
-        cwd=repository,
-    ).strip()
+    root = _git_worktree_root(repository)
     if Path(root).resolve() != repository:
         msg = f"Use the Git repository root directory: {root}"
         raise SkillSyncError(msg)
@@ -124,6 +115,28 @@ def validate_repository(repository: Path, state_home: Path) -> None:
     if skills.is_symlink() or (skills.exists() and not skills.is_dir()):
         msg = f"Personal skills path must be a real directory: {skills}"
         raise SkillSyncError(msg)
+
+
+def _git_worktree_root(repository: Path) -> str:
+    executable = shutil.which("git")
+    if executable is None:
+        msg = "git command not found."
+        raise SkillSyncError(msg)
+    try:
+        result = subprocess.run(  # noqa: S603
+            [executable, "--no-optional-locks", "rev-parse", "--show-toplevel"],
+            cwd=repository,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        msg = f"Unable to inspect local Git working directory {repository}: {exc}"
+        raise SkillSyncError(msg) from exc
+    if result.returncode != 0:
+        msg = f"Cannot inspect local Git working directory {repository}: {result.stderr.strip()}"
+        raise SkillSyncError(msg)
+    return result.stdout.strip()
 
 
 def _create_skills_directory(repository: Path) -> None:

@@ -132,10 +132,29 @@ relinked using the verified `install --force` flow; arbitrary original paths
 can be updated manually. Keep old content until all intended links are checked.
 Existing `skill-sync.json` files are retained and ignored by local management.
 
-## Remaining legacy commands
+## Git workflow
 
-The earlier `publish` and `sync` commands remain legacy operations until M3;
-they do not accept v2 local repository configuration. The local init/add/install/
-list/status flow never stages, commits, fetches, pulls, pushes or sets Git
-identity. See the [personal repository plan](../../docs/skill-sync-personal-repository-plan.md)
-for milestone scope and acceptance records.
+The CLI supports `init`, `add`, `install`, `list`, `status`, and `validate`.
+The earlier `publish` and `sync` commands have been removed. Old invocations
+exit with a migration message before loading configuration or running a process.
+The old remote-URL initialization and branch/identity flags are also rejected.
+
+Use Git directly when you want to save or share your edits:
+
+```bash
+git -C ~/Code/my-skills status
+git -C ~/Code/my-skills diff
+git -C ~/Code/my-skills add skills/foo
+git -C ~/Code/my-skills commit -m "Update foo"
+git -C ~/Code/my-skills push
+```
+
+The tool's only Git subprocess is a fixed `git --no-optional-locks rev-parse
+--show-toplevel` check of the local working directory. It has no generic Git
+runner, publisher, network synchronization or identity configuration. `validate`
+checks skill structure; Git staging, commits, remotes and any commit checks are
+under your control. Read-only v1 migration remains available without restoring
+the old workflows.
+
+See the [personal repository plan](../../docs/skill-sync-personal-repository-plan.md)
+for implementation scope and acceptance records.

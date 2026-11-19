@@ -49,9 +49,9 @@ def link_path(path: Path) -> Path:
     return expanded.parent.resolve() / expanded.name
 
 
-def require_external_path(path: Path, checkout: Path) -> None:
+def require_external_path(path: Path, repository: Path) -> None:
     resolved = link_path(path)
-    registry = checkout.resolve()
-    if resolved.is_relative_to(registry) or registry.is_relative_to(resolved):
-        msg = "Skill installation path must be outside the registry checkout."
+    repository_root = repository.resolve()
+    if resolved.is_relative_to(repository_root) or repository_root.is_relative_to(resolved):
+        msg = "Skill installation path must be outside the personal repository."
         raise SkillSyncError(msg)

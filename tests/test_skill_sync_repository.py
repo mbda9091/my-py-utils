@@ -5,12 +5,16 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from skill_sync.config import LOCAL_SCHEMA_VERSION, config_path, init_config, installations_path
+from skill_sync.config import LOCAL_SCHEMA_VERSION, config_path, installations_path
 from skill_sync.errors import LegacyConfigError, SkillSyncError
-from skill_sync.git_repo import run_git
 from skill_sync.repository import init_repository, read_repository_config
 
-from tests.skill_sync_helpers import make_local_repository, make_registry
+from tests.skill_sync_helpers import (
+    make_committed_repository,
+    make_local_repository,
+    run_git,
+    write_legacy_config,
+)
 
 
 def test_repository_binding_is_persistent_minimal_and_idempotent(tmp_path: Path) -> None:
@@ -86,9 +90,9 @@ def test_rebinding_replaces_single_path_and_preserves_old_state(tmp_path: Path) 
 
 def test_legacy_config_requires_explicit_binding_and_is_backed_up(tmp_path: Path) -> None:
     state = tmp_path / "state"
-    legacy = init_config("git@example.com:me/skills.git", branch="custom", state_home=state)
-    (legacy.checkout / "skills").mkdir(parents=True)
-    (legacy.checkout / "skills" / "keep.txt").write_text("Legacy content\n")
+    legacy = write_legacy_config(state, branch="custom")
+    (legacy / "skills").mkdir(parents=True)
+    (legacy / "skills" / "keep.txt").write_text("Legacy content\n")
     before = config_path(state).read_bytes()
     records = json.dumps(
         {
@@ -114,7 +118,7 @@ def test_legacy_config_requires_explicit_binding_and_is_backed_up(tmp_path: Path
     assert (
         json.loads(installations_path(state).read_text())["schemaVersion"] == LOCAL_SCHEMA_VERSION
     )
-    assert (legacy.checkout / "skills" / "keep.txt").read_text() == "Legacy content\n"
+    assert (legacy / "skills" / "keep.txt").read_text() == "Legacy content\n"
     assert read_repository_config(state).repository_path == repository
 
 
@@ -211,16 +215,16 @@ def test_skills_directory_must_be_real(tmp_path: Path, kind: str) -> None:
 
 
 def test_worktree_is_accepted_without_modifying_git_config(tmp_path: Path) -> None:
-    legacy = make_registry(tmp_path)
+    git_repository = make_committed_repository(tmp_path)
     worktree = tmp_path / "worktree"
-    run_git(["worktree", "add", "--detach", str(worktree)], cwd=legacy.checkout)
-    git_config = (legacy.checkout / ".git" / "config").read_bytes()
+    run_git(["worktree", "add", "--detach", str(worktree)], cwd=git_repository.path)
+    git_config = (git_repository.path / ".git" / "config").read_bytes()
 
     config = init_repository(worktree, state_home=tmp_path / "local-state")
 
     assert (worktree / ".git").is_file()
     assert read_repository_config(config.state_home) == config
-    assert (legacy.checkout / ".git" / "config").read_bytes() == git_config
+    assert (git_repository.path / ".git" / "config").read_bytes() == git_config
 
 
 def test_failed_config_write_keeps_previous_binding(
