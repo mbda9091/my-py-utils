@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 SCHEMA_VERSION = 1
+LOCAL_SCHEMA_VERSION = 2
 STATE_HOME_ENV = "SKILL_SYNC_HOME"
 
 
@@ -246,6 +247,9 @@ def atomic_write_json(path: Path, payload: object) -> None:
 
 def _validate_config_payload(payload: Mapping[str, object], path: Path) -> ConfigPayload:
     schema_version = payload.get("schemaVersion")
+    if schema_version == LOCAL_SCHEMA_VERSION:
+        msg = "This legacy registry command is unavailable with a local repository configuration."
+        raise SkillSyncError(msg)
     repository = payload.get("repository")
     branch = payload.get("branch")
     checkout = payload.get("checkout")

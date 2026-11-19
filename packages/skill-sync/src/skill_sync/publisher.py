@@ -10,10 +10,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TypeAlias, cast
 
-from skill_sync.catalog import REGISTRY_SKILLS_DIR, SYNC_METADATA_FILE
+from skill_sync.catalog import REGISTRY_SKILLS_DIR, SYNC_METADATA_FILE, registry_skill_path
+from skill_sync.config import atomic_write_json
 from skill_sync.errors import SkillSyncError
-from skill_sync.git_repo import commit_path, push_with_retry, sync_repository
-from skill_sync.security import SecurityFinding, assert_publish_safe, should_ignore_path
+from skill_sync.git_repo import (
+    apply_git_identity,
+    commit_path,
+    push_with_retry,
+    run_git,
+    run_git_result,
+    sync_repository,
+    validate_registry_repository,
+)
+from skill_sync.security import (
+    SecurityFinding,
+    assert_publish_safe,
+    iter_publish_files,
+    should_ignore_path,
+)
 from skill_sync.validation import validate_local_skill
 
 if TYPE_CHECKING:
@@ -44,6 +58,9 @@ def publish_skill(
     ensure_publish_identity(config)
     metadata = validate_local_skill(local_skill_dir)
     findings = assert_publish_safe(metadata.path)
+    destination = registry_skill_path(config.checkout, metadata.name)
+    if metadata.path == destination.resolve():
+        return _publish_managed_skill(metadata, config, findings, push=push, clock=clock)
     sync_repository(config)
 
     skills_root = config.checkout / REGISTRY_SKILLS_DIR
@@ -55,7 +72,7 @@ def publish_skill(
     skills_root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC) if clock is None else clock()
 
-    with TemporaryDirectory(prefix="skill-sync-publish-") as temporary:
+    with TemporaryDirectory(prefix=".skill-sync-publish-", dir=skills_root) as temporary:
         staged_skill = Path(temporary) / metadata.name
         copy_publish_tree(metadata.path, staged_skill)
         if destination.exists() and is_registry_skill_unchanged(
@@ -105,6 +122,79 @@ def publish_skill(
     )
 
 
+def _publish_managed_skill(
+    metadata: SkillMetadata,
+    config: Config,
+    findings: list[SecurityFinding],
+    *,
+    push: bool,
+    clock: Clock | None,
+) -> PublishResult:
+    validate_registry_repository(config)
+    apply_git_identity(config)
+    relative_path = Path(REGISTRY_SKILLS_DIR) / metadata.name
+    files, changed = _managed_publish_files(metadata.path, config.checkout, relative_path)
+    commit_created = False
+    if changed or not _metadata_matches(metadata.path, metadata):
+        now = datetime.now(UTC) if clock is None else clock()
+        write_sync_metadata(metadata.path, metadata, now)
+        commit_created = commit_path(
+            config.checkout,
+            relative_path,
+            f"Update skill: {metadata.name}",
+            files=files,
+        )
+    if push:
+        # Also retry a previous --no-push publication or a failed push.
+        push_with_retry(config.checkout, config.branch)
+    return PublishResult(
+        name=metadata.name,
+        changed=commit_created,
+        pushed=push,
+        commit_created=commit_created,
+        warnings=tuple(_low_risk_findings(findings)),
+        registry_path=metadata.path,
+    )
+
+
+def _managed_publish_files(
+    skill_dir: Path,
+    checkout: Path,
+    relative_path: Path,
+) -> tuple[list[Path], bool]:
+    current = {
+        relative_path / path.relative_to(skill_dir) for path in iter_publish_files(skill_dir)
+    }
+    ignored = run_git_result(
+        ["check-ignore", "--stdin", "-z"],
+        cwd=checkout,
+        input_text="".join(f"{path}\0" for path in sorted(current)),
+    )
+    if ignored.returncode not in {0, 1}:
+        msg = f"Cannot inspect Git ignore rules: {ignored.stderr.strip()}"
+        raise SkillSyncError(msg)
+    current.difference_update(Path(path) for path in ignored.stdout.split("\0") if path)
+    head = run_git(
+        ["ls-tree", "-r", "--name-only", "-z", "HEAD", "--", str(relative_path)],
+        cwd=checkout,
+    )
+    index = run_git(["ls-files", "-z", "--", str(relative_path)], cwd=checkout)
+    tracked = {
+        Path(path)
+        for path in (head + index).split("\0")
+        if path and not should_ignore_path(Path(path).relative_to(relative_path))
+    }
+    files = sorted(current | tracked | {relative_path / SYNC_METADATA_FILE})
+    diff = run_git_result(
+        ["diff", "HEAD", "--quiet", "--", *[str(path) for path in files]],
+        cwd=checkout,
+    )
+    if diff.returncode not in {0, 1}:
+        msg = f"Cannot inspect managed skill changes: {diff.stderr.strip()}"
+        raise SkillSyncError(msg)
+    return files, bool(current - tracked) or diff.returncode == 1
+
+
 def ensure_publish_identity(config: Config) -> None:
     if config.git_identity is not None:
         return
@@ -133,10 +223,7 @@ def write_sync_metadata(skill_dir: Path, metadata: SkillMetadata, updated_at: da
         "compatibility": ["codex"],
         "updatedAt": _format_timestamp(updated_at),
     }
-    (skill_dir / SYNC_METADATA_FILE).write_text(
-        f"{json.dumps(payload, indent=2, sort_keys=True)}\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(skill_dir / SYNC_METADATA_FILE, payload)
 
 
 def is_registry_skill_unchanged(
@@ -144,6 +231,13 @@ def is_registry_skill_unchanged(
     existing_skill: Path,
     metadata: SkillMetadata,
 ) -> bool:
+    return _metadata_matches(existing_skill, metadata) and _directories_equal(
+        staged_skill,
+        existing_skill,
+    )
+
+
+def _metadata_matches(existing_skill: Path, metadata: SkillMetadata) -> bool:
     metadata_path = existing_skill / SYNC_METADATA_FILE
     if not metadata_path.is_file():
         return False
@@ -156,15 +250,12 @@ def is_registry_skill_unchanged(
         return False
 
     payload = cast("dict[str, object]", raw_payload)
-    static_metadata_matches = (
+    return (
         payload.get("schemaVersion") == 1
         and payload.get("name") == metadata.name
         and payload.get("description") == metadata.description
         and payload.get("compatibility") == ["codex"]
     )
-    if not static_metadata_matches:
-        return False
-    return _directories_equal(staged_skill, existing_skill)
 
 
 def replace_directory(source: Path, destination: Path) -> None:

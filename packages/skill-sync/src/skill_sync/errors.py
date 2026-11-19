@@ -7,3 +7,7 @@ class SkillSyncError(RuntimeError):
 
 class TargetSkillExistsError(SkillSyncError):
     """Raised when an install target already exists and force is disabled."""
+
+
+class LegacyConfigError(SkillSyncError):
+    """Raised when local repository commands encounter a legacy registry config."""

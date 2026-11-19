@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from skill_sync.errors import SkillSyncError
 from skill_sync.git_repo import ensure_git_repository
-from skill_sync.validation import validate_skill_name
+from skill_sync.validation import SkillMetadata, validate_local_skill, validate_skill_name
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -14,6 +14,26 @@ if TYPE_CHECKING:
 
 REGISTRY_SKILLS_DIR = "skills"
 SYNC_METADATA_FILE = "skill-sync.json"
+
+
+def list_local_skills(repository: Path) -> list[SkillMetadata]:
+    skills_root = repository / REGISTRY_SKILLS_DIR
+    if skills_root.is_symlink() or (skills_root.exists() and not skills_root.is_dir()):
+        msg = f"Personal skills path must be a real directory: {skills_root}"
+        raise SkillSyncError(msg)
+    if not skills_root.exists():
+        return []
+    skills: list[SkillMetadata] = []
+    for path in sorted(skills_root.iterdir()):
+        if path.is_symlink():
+            msg = f"Personal skill must be stored in a real directory: {path}"
+            raise SkillSyncError(msg)
+        if path.is_dir() and ((path / "SKILL.md").exists() or (path / "SKILL.md").is_symlink()):
+            if (path / "SKILL.md").is_symlink():
+                msg = f"Skill descriptor must be a real file: {path / 'SKILL.md'}"
+                raise SkillSyncError(msg)
+            skills.append(validate_local_skill(path))
+    return skills
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +65,7 @@ def list_skills(checkout: Path) -> list[RegistrySkill]:
 def find_skill(checkout: Path, name: str) -> RegistrySkill:
     validate_skill_name(name)
     ensure_registry_checkout(checkout)
-    skill_dir = checkout / REGISTRY_SKILLS_DIR / name
+    skill_dir = registry_skill_path(checkout, name)
     if not skill_dir.exists():
         msg = f"Skill not found in registry cache: {name}"
         raise SkillSyncError(msg)
@@ -56,6 +76,16 @@ def find_skill(checkout: Path, name: str) -> RegistrySkill:
         msg = f"Registry skill is missing SKILL.md: {skill_dir}"
         raise SkillSyncError(msg)
     return read_registry_skill(skill_dir)
+
+
+def registry_skill_path(checkout: Path, name: str) -> Path:
+    validate_skill_name(name)
+    skills_root = checkout / REGISTRY_SKILLS_DIR
+    skill_dir = skills_root / name
+    if skills_root.is_symlink() or skill_dir.is_symlink():
+        msg = f"Registry skill must be stored in a real directory: {skill_dir}"
+        raise SkillSyncError(msg)
+    return skill_dir
 
 
 def read_registry_skill(skill_dir: Path) -> RegistrySkill:

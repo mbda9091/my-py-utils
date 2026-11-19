@@ -79,7 +79,7 @@ def validate_local_skill(local_skill_dir: Path) -> SkillMetadata:
 
     try:
         fields = parse_frontmatter(skill_file.read_text(encoding="utf-8"))
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         msg = f"Unable to read SKILL.md: {skill_file}: {exc}"
         raise SkillSyncError(msg) from exc
 

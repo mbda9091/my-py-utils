@@ -2,6 +2,15 @@
 
 状态：草案
 
+本文保留初版复制安装方案。当前版本已改为软链接安装，并新增 `add` 本地纳管；
+已纳管 Skill 的 `publish` 支持直接提交仓库内修改。
+最新用法与行为见 [skill-sync README](../packages/skill-sync/README.md)。
+
+2026-11-20 的职责调整另见
+[个人仓库纳管与软链接安装方案](skill-sync-personal-repository-plan.md)：
+目标是由用户维护独立个人仓库，工具仅负责本地纳管和安装，Git 提交与推送由用户自行完成。
+其中 M1 已提供本地仓库配置与 SKILL.md 发现；add/install 改造及移除 publish/sync 仍待后续阶段。
+
 日期：2026-08-09
 
 ## 1. 目标

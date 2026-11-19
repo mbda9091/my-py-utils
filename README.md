@@ -26,8 +26,9 @@ tests/                  Workspace-level tests
 See [docs/uv-workspace-notes.md](docs/uv-workspace-notes.md) for the concepts
 behind this layout.
 
-skill-sync 个人 GitHub 同步工具方案见
-[docs/skill-sync-design.md](docs/skill-sync-design.md)。
+skill-sync 个人技能仓库的配置、纳管与安装方案见
+[docs/skill-sync-personal-repository-plan.md](docs/skill-sync-personal-repository-plan.md)，
+当前可用范围见 [使用说明](packages/skill-sync/README.md)。
 
 Codex 会话导出：
 [方案文档](docs/codex-session-export-design.md) ·
@@ -55,7 +56,7 @@ uv run --package workspacectl workspacectl --help
 uv run --package private-pack private-pack --help
 uv run --package repo-security repo-security --help
 uv run --package system-alarm system-alarm create --time 07:30 --label "起床"
-uv run --package skill-sync skill-sync init git@github.com:mbda9091/my-skills.git --branch main --git-name mbda9091 --git-email registry@example.com
+uv run --package skill-sync skill-sync init --repo ~/Code/my-skills
 ```
 
 ## Initialize This Project
