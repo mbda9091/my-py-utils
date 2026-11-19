@@ -12,6 +12,7 @@ from skill_sync.errors import SkillSyncError
 from skill_sync.git_repo import run_git, sync_repository
 from skill_sync.installer import install_skill
 from skill_sync.publisher import publish_skill
+from skill_sync.repository import RepositoryConfig
 
 from tests.skill_sync_helpers import make_registry, write_skill
 
@@ -198,7 +199,7 @@ def test_add_edit_publish_and_linked_install_with_real_git(tmp_path: Path) -> No
     (original / "nested").mkdir()
     (original / "nested" / ".venv").mkdir()
     (original / "nested" / ".venv" / "private.txt").write_text("Nested\n", encoding="utf-8")
-    add_skill(original, config)
+    add_skill(original, RepositoryConfig(config.checkout, config.state_home))
     (original / "reference.md").write_text("Edited via original path\n", encoding="utf-8")
     (config.checkout / "unrelated.txt").write_text("Staged separately\n", encoding="utf-8")
     run_git(["add", "unrelated.txt"], cwd=config.checkout)
@@ -227,7 +228,7 @@ def test_add_edit_publish_and_linked_install_with_real_git(tmp_path: Path) -> No
 
     second_install = install_skill(
         "demo-skill",
-        config,
+        RepositoryConfig(config.checkout, config.state_home),
         target="codex",
         target_root=tmp_path / "second" / "skills",
     )
@@ -258,7 +259,7 @@ def test_add_edit_publish_and_linked_install_with_real_git(tmp_path: Path) -> No
 def test_managed_publish_no_push_can_be_pushed_later_without_new_commit(tmp_path: Path) -> None:
     config = make_registry(tmp_path)
     original = write_skill(tmp_path / "local")
-    add_skill(original, config)
+    add_skill(original, RepositoryConfig(config.checkout, config.state_home))
     remote_before = run_git(["rev-parse", "main"], cwd=Path(config.repository))
     assert publish_skill(original, config, push=False).changed
     local_head = run_git(["rev-parse", "HEAD"], cwd=config.checkout)
@@ -275,23 +276,23 @@ def test_managed_publish_no_push_can_be_pushed_later_without_new_commit(tmp_path
 def test_managed_publish_blocks_credentials_without_creating_commit(tmp_path: Path) -> None:
     config = make_registry(tmp_path)
     original = write_skill(tmp_path / "local")
-    add_skill(original, config)
+    add_skill(original, RepositoryConfig(config.checkout, config.state_home))
     (original / ".env").write_text("TOKEN=private\n", encoding="utf-8")
     before = run_git(["rev-parse", "HEAD"], cwd=config.checkout)
-    metadata_before = (original / "skill-sync.json").read_bytes()
+    assert not (original / "skill-sync.json").exists()
 
     with pytest.raises(SkillSyncError, match="Publish blocked"):
         publish_skill(original, config)
 
     assert run_git(["rev-parse", "HEAD"], cwd=config.checkout) == before
-    assert (original / "skill-sync.json").read_bytes() == metadata_before
+    assert not (original / "skill-sync.json").exists()
     assert original.is_symlink()
 
 
 def test_managed_publish_rejects_wrong_branch_without_switching(tmp_path: Path) -> None:
     config = make_registry(tmp_path)
     original = write_skill(tmp_path / "local")
-    add_skill(original, config)
+    add_skill(original, RepositoryConfig(config.checkout, config.state_home))
     run_git(["checkout", "-b", "other"], cwd=config.checkout)
 
     with pytest.raises(SkillSyncError, match="configured branch"):
@@ -302,13 +303,12 @@ def test_managed_publish_rejects_wrong_branch_without_switching(tmp_path: Path) 
 
 def test_managed_publish_tracks_files_inside_embedded_git_repository(tmp_path: Path) -> None:
     config = make_registry(tmp_path)
-    original = write_skill(tmp_path / "local")
+    original = write_skill(config.checkout / "skills")
     run_git(["init", "--initial-branch=main", str(original)], cwd=None)
     (original / "reference.md").symlink_to("SKILL.md")
     script = original / "run.sh"
     script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     script.chmod(0o755)
-    add_skill(original, config)
 
     assert publish_skill(original, config, push=False).changed
 
@@ -326,7 +326,7 @@ def test_managed_publish_commits_previously_staged_deletion(tmp_path: Path) -> N
     config = make_registry(tmp_path)
     original = write_skill(tmp_path / "local")
     (original / "reference.md").write_text("Reference\n", encoding="utf-8")
-    add_skill(original, config)
+    add_skill(original, RepositoryConfig(config.checkout, config.state_home))
     publish_skill(original, config, push=False)
     run_git(["rm", "skills/demo-skill/reference.md"], cwd=config.checkout)
 

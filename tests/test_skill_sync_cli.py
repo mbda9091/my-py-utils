@@ -1,49 +1,30 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
 
 import pytest
 from skill_sync.cli import main
 from skill_sync.config import (
-    atomic_write_json,
     config_path,
-    config_to_payload,
     init_config,
-    read_installations,
 )
 from skill_sync.git_repo import run_git
 from skill_sync.repository import read_repository_config
 
-from tests.skill_sync_helpers import make_local_repository, make_registry, write_skill
+from tests.skill_sync_helpers import (
+    make_local_repository,
+    make_personal_config,
+    make_registry,
+    write_skill,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 ARGPARSE_USAGE_ERROR = 2
-
-
-def write_registry_skill(checkout: Path, name: str, body: str = "Skill body\n") -> Path:
-    skill_dir = checkout / "skills" / name
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(body, encoding="utf-8")
-    (skill_dir / "skill-sync.json").write_text(
-        json.dumps(
-            {
-                "schemaVersion": 1,
-                "name": name,
-                "description": "Demo skill.",
-                "compatibility": ["codex"],
-                "updatedAt": "2026-08-09T00:00:00Z",
-            },
-        ),
-        encoding="utf-8",
-    )
-    return skill_dir
 
 
 def test_cli_init_and_status_use_configured_state_home(
@@ -101,95 +82,48 @@ def test_cli_validate_reports_metadata(
     assert "name: demo-skill" in output.out
 
 
-def test_cli_install_all_installs_each_registry_skill(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+def test_cli_install_all_uses_personal_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    state_home = tmp_path / "state"
-    home = tmp_path / "home"
-    monkeypatch.setenv("SKILL_SYNC_HOME", str(state_home))
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr("skill_sync.installer.current_commit", Mock(return_value="abc1234"))
-    init_config("git@example.com:me/skills.git", branch="main")
-    capsys.readouterr()
-    checkout = state_home / "repository"
-    (checkout / ".git").mkdir(parents=True)
-    write_registry_skill(checkout, "zeta-skill", "Zeta body\n")
-    write_registry_skill(checkout, "alpha-skill", "Alpha body\n")
-
+    config = make_personal_config(tmp_path)
+    monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    write_skill(config.repository_path / "skills", "alpha-skill")
+    write_skill(config.repository_path / "skills", "zeta-skill")
     assert main(["install", "--all", "--target", "codex"]) == 0
-
     output = capsys.readouterr()
-    assert "Installed skill: alpha-skill" in output.out
-    assert "Installed skill: zeta-skill" in output.out
+    assert "Installed: 2; failed: 0" in output.out
     assert output.err == ""
-    skills_root = home / ".agents" / "skills"
-    assert (skills_root / "alpha-skill").is_symlink()
-    assert (skills_root / "zeta-skill").is_symlink()
-    assert (skills_root / "alpha-skill" / "SKILL.md").read_text(encoding="utf-8") == "Alpha body\n"
-    assert (skills_root / "zeta-skill" / "SKILL.md").read_text(encoding="utf-8") == "Zeta body\n"
+    assert (tmp_path / "home/.agents/skills/alpha-skill").is_symlink()
 
 
-def test_cli_install_all_skips_existing_skill_without_force(
+@pytest.mark.parametrize("force", [False, True])
+def test_cli_install_all_preserves_foreign_content_and_reports_partial_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    *,
+    force: bool,
 ) -> None:
-    state_home = tmp_path / "state"
-    home = tmp_path / "home"
-    monkeypatch.setenv("SKILL_SYNC_HOME", str(state_home))
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr("skill_sync.installer.current_commit", Mock(return_value="abc1234"))
-    init_config("git@example.com:me/skills.git", branch="main")
-    capsys.readouterr()
-    checkout = state_home / "repository"
-    (checkout / ".git").mkdir(parents=True)
-    write_registry_skill(checkout, "alpha-skill", "Registry alpha\n")
-    write_registry_skill(checkout, "beta-skill", "Registry beta\n")
-    existing = home / ".agents" / "skills" / "alpha-skill"
+    config = make_personal_config(tmp_path)
+    monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    write_skill(config.repository_path / "skills", "alpha-skill")
+    write_skill(config.repository_path / "skills", "beta-skill")
+    existing = tmp_path / "home/.agents/skills/alpha-skill"
     existing.mkdir(parents=True)
-    (existing / "SKILL.md").write_text("Existing alpha\n", encoding="utf-8")
-
-    assert main(["install", "--all", "--target", "codex"]) == 0
-
+    (existing / "keep.txt").write_text("Keep")
+    args = ["install", "--all", "--target", "codex"]
+    if force:
+        args.append("--force")
+    assert main(args) == 1
     output = capsys.readouterr()
     assert "Installed skill: beta-skill" in output.out
-    assert "Installed skill: alpha-skill" not in output.out
-    assert "[ERROR] Target skill already exists:" in output.err
-    assert "Pass --force to overwrite it." in output.err
-    assert (existing / "SKILL.md").read_text(encoding="utf-8") == "Existing alpha\n"
-    records = read_installations(state_home)
-    assert "codex:alpha-skill" not in records
-    assert "codex:beta-skill" in records
-
-
-def test_cli_install_all_force_overwrites_existing_skill(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    state_home = tmp_path / "state"
-    home = tmp_path / "home"
-    monkeypatch.setenv("SKILL_SYNC_HOME", str(state_home))
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr("skill_sync.installer.current_commit", Mock(return_value="abc1234"))
-    init_config("git@example.com:me/skills.git", branch="main")
-    capsys.readouterr()
-    checkout = state_home / "repository"
-    (checkout / ".git").mkdir(parents=True)
-    write_registry_skill(checkout, "alpha-skill", "Registry alpha\n")
-    existing = home / ".agents" / "skills" / "alpha-skill"
-    existing.mkdir(parents=True)
-    (existing / "SKILL.md").write_text("Existing alpha\n", encoding="utf-8")
-
-    assert main(["install", "--all", "--target", "codex", "--force"]) == 0
-
-    output = capsys.readouterr()
-    assert "Installed skill: alpha-skill" in output.out
-    assert output.err == ""
-    assert existing.is_symlink()
-    assert (existing / "SKILL.md").read_text(encoding="utf-8") == "Registry alpha\n"
+    assert "Installed: 1; failed: 1" in output.out
+    assert "preserved" in output.err
+    assert not existing.is_symlink()
+    assert (existing / "keep.txt").read_text() == "Keep"
+    assert (existing.parent / "beta-skill").is_symlink()
 
 
 def test_cli_install_requires_skill_name_or_all(capsys: pytest.CaptureFixture[str]) -> None:
@@ -199,14 +133,14 @@ def test_cli_install_requires_skill_name_or_all(capsys: pytest.CaptureFixture[st
     assert "Pass a skill name or --all." in output.err
 
 
-def test_cli_add_and_publish_managed_skill(
+def test_cli_add_and_install_managed_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    config = make_registry(tmp_path)
-    atomic_write_json(config_path(config.state_home), config_to_payload(config))
+    config = make_personal_config(tmp_path)
     monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     original = write_skill(tmp_path / "home" / ".agents" / "skills")
 
     assert main(["add", str(original)]) == 0
@@ -216,10 +150,9 @@ def test_cli_add_and_publish_managed_skill(
     assert original.is_symlink()
     assert main(["add", str(original)]) == 0
     assert "Skill already managed: demo-skill" in capsys.readouterr().out
-    assert main(["publish", str(original), "--no-push"]) == 0
+    assert main(["install", "demo-skill", "--target", "codex"]) == 0
     output = capsys.readouterr()
-    assert "Published skill: demo-skill" in output.out
-    assert "pushed: false" in output.out
+    assert "Installed skill: demo-skill" in output.out
     assert output.err == ""
 
 
@@ -228,10 +161,9 @@ def test_cli_add_conflict_returns_error_without_moving_source(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    config = make_registry(tmp_path)
-    atomic_write_json(config_path(config.state_home), config_to_payload(config))
+    config = make_personal_config(tmp_path)
     monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
-    write_skill(config.checkout / "skills")
+    write_skill(config.repository_path / "skills")
     original = write_skill(tmp_path / "local")
 
     assert main(["add", str(original)]) == 1
@@ -274,8 +206,20 @@ def test_cli_reuses_single_repository_across_processes(tmp_path: Path) -> None:
     assert status.returncode == 0, status.stderr
     assert f"repository: {repository}" in status.stdout
     assert "skills: 1" in status.stdout
+    absorbed = write_skill(tmp_path / "external", "absorbed-skill")
+    assert invoke("add", str(absorbed)).returncode == 0
+    assert absorbed.is_symlink()
+    result = invoke("install", "demo-skill", "--target", "codex")
+    assert result.returncode == 0, result.stderr
+    installed = tmp_path / "home/.agents/skills/demo-skill"
+    assert installed.is_symlink()
+    (installed / "notes.md").write_text("Edited through installed path")
+    assert (
+        repository / "skills/demo-skill/notes.md"
+    ).read_text() == "Edited through installed path"
+    assert "installations: 2" in invoke("status").stdout
     assert config_path(state).read_bytes() == config_before
-    assert not (state / "installations.json").exists()
+    assert (state / "installations.json").exists()
     git_after = {
         path.relative_to(repository): path.read_bytes()
         for path in (repository / ".git").rglob("*")

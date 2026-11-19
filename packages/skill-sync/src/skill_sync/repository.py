@@ -8,6 +8,7 @@ from typing import cast
 
 from skill_sync.config import (
     LOCAL_SCHEMA_VERSION,
+    atomic_write_bytes,
     atomic_write_json,
     config_path,
     get_state_home,
@@ -16,6 +17,7 @@ from skill_sync.config import (
 )
 from skill_sync.errors import LegacyConfigError, SkillSyncError
 from skill_sync.git_repo import run_git
+from skill_sync.installations import installations_payload, read_managed_installations
 
 INIT_HINT = "Run 'skill-sync init --repo <local-repo>' to configure a local repository."
 
@@ -32,27 +34,54 @@ def init_repository(repository_path: Path, *, state_home: Path | None = None) ->
     validate_repository(repository, home)
     path = config_path(home)
     existing = _read_payload(path) if path.exists() else None
+    legacy_repository: Path | None = None
+    config_changed = True
     if existing is not None:
         version = existing.get("schemaVersion")
         if type(version) is int and version == 1:
             # Validate the old format before preserving it; a URL is never a local path.
-            read_config(home)
+            legacy_repository = read_config(home).checkout.expanduser().absolute()
         else:
             current = _config_from_payload(existing, home)
             if current.repository_path == repository:
-                _create_skills_directory(repository)
-                return current
+                config_changed = False
+
+    records_path = installations_path(home)
+    old_records = records_path.read_bytes() if records_path.exists() else None
+    records = read_managed_installations(home, legacy_repository=legacy_repository)
+    records_payload = installations_payload(records)
+    records_changed = old_records is not None and json.loads(old_records) != records_payload
+    old_config = path.read_bytes() if path.exists() else None
+    if existing is not None and (config_changed or records_changed):
         _backup_file(path)
-        records = installations_path(home)
-        if records.exists():
-            _backup_file(records)
+        if records_path.exists():
+            _backup_file(records_path)
 
     _create_skills_directory(repository)
     config = RepositoryConfig(repository_path=repository, state_home=home)
-    atomic_write_json(
-        path, {"schemaVersion": LOCAL_SCHEMA_VERSION, "repositoryPath": str(repository)}
-    )
+    try:
+        if records_changed:
+            atomic_write_json(records_path, records_payload)
+        if config_changed:
+            atomic_write_json(
+                path, {"schemaVersion": LOCAL_SCHEMA_VERSION, "repositoryPath": str(repository)}
+            )
+    except (OSError, SkillSyncError) as exc:
+        try:
+            _restore_file(path, old_config)
+            _restore_file(records_path, old_records)
+        except (OSError, SkillSyncError) as restore_error:
+            msg = f"Cannot restore binding; original state retained in *.bak: {restore_error}"
+            raise SkillSyncError(msg) from exc
+        raise
     return config
+
+
+def _restore_file(path: Path, contents: bytes | None) -> None:
+    if contents is None:
+        path.unlink(missing_ok=True)
+    elif not path.exists() or path.read_bytes() != contents:
+        atomic_write_bytes(path, contents)
 
 
 def read_repository_config(state_home: Path | None = None) -> RepositoryConfig:

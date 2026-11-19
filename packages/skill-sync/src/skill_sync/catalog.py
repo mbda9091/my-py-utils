@@ -36,6 +36,17 @@ def list_local_skills(repository: Path) -> list[SkillMetadata]:
     return skills
 
 
+def find_local_skill(repository: Path, name: str) -> SkillMetadata:
+    skill = registry_skill_path(repository, name)
+    if not skill.exists():
+        msg = f"Skill not found in personal repository: {name}"
+        raise SkillSyncError(msg)
+    if (skill / "SKILL.md").is_symlink():
+        msg = f"Skill descriptor must be a real file: {skill / 'SKILL.md'}"
+        raise SkillSyncError(msg)
+    return validate_local_skill(skill)
+
+
 @dataclass(frozen=True, slots=True)
 class RegistrySkill:
     name: str

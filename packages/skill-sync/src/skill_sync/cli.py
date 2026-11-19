@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from skill_sync.adder import add_skill
-from skill_sync.catalog import list_local_skills, list_skills
+from skill_sync.catalog import list_local_skills
 from skill_sync.config import read_config
-from skill_sync.errors import LegacyConfigError, SkillSyncError, TargetSkillExistsError
+from skill_sync.errors import LegacyConfigError, SkillSyncError
 from skill_sync.git_repo import sync_repository
+from skill_sync.installations import installation_status, read_managed_installations
 from skill_sync.installer import install_skill
 from skill_sync.publisher import publish_skill
 from skill_sync.repository import init_repository, read_repository_config
@@ -19,8 +20,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import TextIO
 
-    from skill_sync.config import Config
     from skill_sync.installer import InstallResult
+    from skill_sync.repository import RepositoryConfig
     from skill_sync.security import SecurityFinding
 
 
@@ -43,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_parser = subparsers.add_parser(
         "add",
-        help="Move a local skill into the registry and link it back.",
+        help="Move a local skill into the personal repository and link it back.",
     )
     add_parser.add_argument("local_skill_dir", type=Path)
 
@@ -54,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     install_parser = subparsers.add_parser(
         "install",
-        help="Link a registry skill into the local skills directory.",
+        help="Link a personal repository skill into the local skills directory.",
     )
     install_parser.add_argument("skill_name", nargs="?")
     install_parser.add_argument("--all", action="store_true", dest="install_all")
@@ -68,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return _run_command(args, sys.stdout, sys.stderr)
-    except SkillSyncError as exc:
+    except (SkillSyncError, OSError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
 
@@ -106,11 +107,12 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
 
 
 def _run_add(path: Path, output: TextIO) -> None:
-    result = add_skill(path, read_config())
+    output.write("Keep this skill unchanged until the add operation finishes.\n")
+    result = add_skill(path, read_repository_config())
     action = "Added skill" if result.changed else "Skill already managed"
     output.write(f"{action}: {result.name}\n")
     output.write(f"path: {result.path}\n")
-    output.write(f"registry path: {result.registry_path}\n")
+    output.write(f"repository path: {result.registry_path}\n")
 
 
 def _run_publish(args: argparse.Namespace, output: TextIO) -> None:
@@ -136,21 +138,20 @@ def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         if skill_name is not None:
             msg = "Pass either a skill name or --all, not both."
             raise SkillSyncError(msg)
-        config = read_config()
-        _install_all(
+        config = read_repository_config()
+        return _install_all(
             config,
             target=args.target,
             force=args.force,
             output=output,
             error_output=error_output,
         )
-        return 0
 
     if not isinstance(skill_name, str):
         msg = "Pass a skill name or --all."
         raise SkillSyncError(msg)
 
-    config = read_config()
+    config = read_repository_config()
     result = install_skill(
         skill_name,
         config,
@@ -162,32 +163,38 @@ def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO)
 
 
 def _install_all(
-    config: Config,
+    config: RepositoryConfig,
     *,
     target: str,
     force: bool,
     output: TextIO,
     error_output: TextIO,
-) -> None:
-    skills = list_skills(config.checkout)
+) -> int:
+    skills = list_local_skills(config.repository_path)
     if not skills:
         output.write("No skills found.\n")
-        return
+        return 0
 
+    installed = 0
+    failed = 0
     for skill in skills:
         try:
             result = install_skill(skill.name, config, target=target, force=force)
-        except TargetSkillExistsError as exc:
+        except SkillSyncError as exc:
             error_output.write(f"[ERROR] {exc}\n")
+            failed += 1
             continue
         _write_install_result(output, result)
+        installed += 1
+    output.write(f"Installed: {installed}; failed: {failed}\n")
+    return int(failed > 0)
 
 
 def _write_install_result(output: TextIO, result: InstallResult) -> None:
     output.write(f"Installed skill: {result.name}\n")
     output.write(f"target: {result.target}\n")
     output.write(f"path: {result.path}\n")
-    output.write(f"commit: {result.commit}\n")
+    output.write(f"source: {result.source_path}\n")
 
 
 def _write_status(output: TextIO) -> None:
@@ -199,6 +206,12 @@ def _write_status(output: TextIO) -> None:
     output.write(f"repository: {config.repository_path}\n")
     output.write(f"configuration: {config.state_home / 'config.json'}\n")
     output.write(f"skills: {len(list_local_skills(config.repository_path))}\n")
+    records = read_managed_installations(config.state_home)
+    output.write(f"installations: {len(records)}\n")
+    for record in sorted(records.values(), key=lambda item: str(item.path)):
+        status = installation_status(record, config.repository_path)
+        source = str(record.source_path) if record.source_path is not None else "unknown"
+        output.write(f"installation: {record.skill}\t{status}\t{record.path}\t{source}\n")
 
 
 def _write_list(output: TextIO) -> None:

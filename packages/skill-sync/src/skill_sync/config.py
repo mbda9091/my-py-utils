@@ -226,23 +226,30 @@ def write_installations(
 
 
 def atomic_write_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    contents = f"{json.dumps(payload, indent=2, sort_keys=True)}\n".encode()
+    atomic_write_bytes(path, contents)
+
+
+def atomic_write_bytes(path: Path, contents: bytes) -> None:
+    temporary_path: Path | None = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
+            "wb",
             dir=path.parent,
             prefix=f".{path.name}.",
             suffix=".tmp",
             delete=False,
         ) as temporary:
-            json.dump(payload, temporary, indent=2, sort_keys=True)
-            temporary.write("\n")
             temporary_path = Path(temporary.name)
+            temporary.write(contents)
         temporary_path.replace(path)
     except OSError as exc:
-        msg = f"Unable to write JSON file: {path}: {exc}"
+        msg = f"Unable to write state file: {path}: {exc}"
         raise SkillSyncError(msg) from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _validate_config_payload(payload: Mapping[str, object], path: Path) -> ConfigPayload:

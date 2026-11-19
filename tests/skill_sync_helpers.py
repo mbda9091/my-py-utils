@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from skill_sync.config import Config, GitIdentity
 from skill_sync.git_repo import apply_git_identity, run_git
+from skill_sync.repository import RepositoryConfig, init_repository
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -13,6 +14,10 @@ def make_local_repository(root: Path) -> Path:
     repository = root / "personal-skills"
     run_git(["init", "--initial-branch=main", str(repository)], cwd=None)
     return repository
+
+
+def make_personal_config(root: Path) -> RepositoryConfig:
+    return init_repository(make_local_repository(root), state_home=root / "local-state")
 
 
 def make_registry(tmp_path: Path) -> Config:

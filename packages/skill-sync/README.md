@@ -1,40 +1,35 @@
 # skill-sync
 
-Manage your skills in a separate personal Git repository. Skill files belong in
-`<personal-skills-repo>/skills/`; `~/.agents/skills` is a client discovery directory
-that can also contain skills from other sources.
+Manage your skills in a separate personal Git repository. Real skill files live
+in `<personal-skills-repo>/skills/`; client directories such as
+`~/.agents/skills` contain symlinks and can also contain skills from other sources.
+You manage Git staging, commits, branches and remotes yourself.
 
-## Configure once and list skills
+## Configure once
 
-M1 provides local repository configuration, discovery, status, and structural
-validation. Prepare an existing Git working repository yourself, then configure
-its directory once:
+Prepare an existing Git working repository, then save its directory once:
 
 ```bash
 skill-sync init --repo ~/Code/my-skills
 skill-sync list
 skill-sync status
-skill-sync validate ~/Code/my-skills/skills/foo
 ```
 
 From this utilities workspace, use `uv run --package skill-sync skill-sync` in
 place of `skill-sync` if the CLI is not installed.
 
-`init --repo` saves the single repository path in `~/.skill-sync/config.json`.
-Later `list` and `status` reuse it across processes and working directories;
-they do not accept repository-selection flags. Repeating initialization with
-the same normalized path is idempotent. Explicitly binding another directory
-replaces the single binding, preserving backup copies of the old configuration
-and any installation records. It does not move old skills or repair old links.
+The one repository path is saved in `~/.skill-sync/config.json`. Later commands
+reuse it across processes and working directories, with no repository-selection
+flags. Repeating the same binding is idempotent. Explicitly binding another
+repository replaces the single binding and backs up the previous configuration
+and installation records, without moving old skills or rewriting their links.
 
-The repository must be a Git working directory root, separate from the client
-skills directory and the local state directory. Both ordinary Git repositories
-and Git worktrees are supported, including repositories without their first
-commit, remote, or Git identity. Skills need a real `skills/` directory, which
-initialization creates if absent. A missing or replaced repository path is
-reported instead of silently selecting another repository.
-
-The saved configuration is:
+The path must be a Git working directory root, separate from the client skills
+directory and local state directory. Ordinary repositories and Git worktrees
+are supported. A first commit, remote, identity, fixed branch or clean working
+directory is not required. Initialization creates an empty real `skills/`
+directory if absent. Missing or replaced repository paths are reported rather
+than silently selecting another repository.
 
 ```json
 {
@@ -43,55 +38,104 @@ The saved configuration is:
 }
 ```
 
-`SKILL_SYNC_HOME` can relocate the local configuration and records directory;
-it does not determine where skill files are stored. Skill management supports
-one bound repository, with no named repositories or per-command selection.
+`SKILL_SYNC_HOME` relocates local configuration and records, not the skill
+content. Only one bound repository is supported.
 
-## Skill discovery
+## Add an existing skill
 
-Create or maintain skills directly in your repository:
-
-```text
-<personal-skills-repo>/
-  .git/
-  skills/
-    foo/
-      SKILL.md
-      scripts/
-    bar/
-      SKILL.md
+```bash
+skill-sync add ~/.agents/skills/foo
 ```
 
-`list` reads each skill's name and description from `SKILL.md`, verifies that the
-frontmatter name matches the directory, and prints name, description, and real
-path in name order. It does not require `skill-sync.json` or installation
-records. Existing legacy metadata is preserved and ignored. Non-skill files
-and directories without a descriptor are skipped; invalid descriptors and
-symlinked skill roots or descriptors produce an error.
+`add` validates the selected skill, moves its complete content into the personal
+repository, and replaces the original path with an absolute symlink:
 
-`status` shows the configured repository, configuration file, and discovered
-skill count. `validate <directory>` checks the structure of one skill without
-requiring a configured repository.
+```text
+<personal-skills-repo>/skills/foo/   real files
+~/.agents/skills/foo                -> personal repository skill
+```
 
-These commands work with uncommitted changes and on any branch. They do not
-stage, commit, fetch, pull, push, configure Git identity, or modify the Git
-index. You manage Git directly, including deciding which files to stage and
-which commits to push.
+The selected path can be outside the Codex directory. The tool only absorbs the
+skill you specify; it does not scan or absorb other skills in the client directory.
+Keep the skill unchanged until migration finishes. The operation stages a copy,
+checks content and metadata for changes, then preserves the original as a backup
+until the link and installation record are ready. Detected edits or failures
+restore the original; a failed restoration retains its backup and reports where
+it can be recovered. Preparing a copy also supports moves across filesystems.
 
-## Legacy configuration and remaining work
+A same-name skill already in the repository is a conflict; neither side is
+overwritten or merged. Repeating `add` on a managed real directory or a link to
+that skill succeeds without another move. Links to other locations, symlinked
+SKILL.md files, nested Git metadata and unsupported special files are rejected.
+All local files are preserved, including caches and existing legacy metadata;
+`add` never generates or refreshes `skill-sync.json`.
 
-With a schema v1 registry configuration, `status` displays migration guidance
-and `list` requires an explicit `init --repo <local-repo>`. Initialization backs
-up the old `config.json` and any `installations.json` next to the originals as
-uniquely named `*.bak` files before writing v2 configuration. It does not clone,
-move or delete the old checkout, alter installation records, or rewrite links.
-Malformed and unsupported configurations are not overwritten.
+## Install a personal skill
 
-The earlier `add`/`install` implementation and `publish`/`sync` commands remain
-legacy operations during this milestone. They do not accept v2 local repository
-configuration. Local skill absorption and symlink installation will be adapted
-in M2; removal of the publication and synchronization workflow is M3. Do not
-use the earlier remote-URL `init` syntax, which has been replaced by `--repo`.
+```bash
+skill-sync install foo --target codex
+skill-sync install --all --target codex
+```
 
-See the [personal repository plan](../../docs/skill-sync-personal-repository-plan.md)
+Installation creates `~/.agents/skills/<name>` as an absolute symlink to the
+personal skill. Existing links to the same skill are idempotent. Edit through
+either path to update the same real files; tracked changes appear in your
+normal Git diff. There is no installation copy, commit pin or publication step.
+
+Unknown directories, files, third-party links and unverified broken links are
+preserved even with `--force`. After explicitly rebinding a new personal
+repository, `--force` can relink a previously registered personal installation
+only when its actual link still matches the recorded old source. Replaced or
+unresolved records do not authorize overwriting content. The old source files
+are never deleted by relinking.
+
+Batch installation continues after individual failures, prints installed/failed
+counts and returns a nonzero status if any skill failed. It only enumerates the
+configured personal repository.
+
+## Discovery and installation records
+
+`list` reads `skills/*/SKILL.md`, verifies directory/name consistency, and prints
+name, description and real path in name order. It needs no publishing metadata
+or installation records. Files and draft directories without a descriptor are
+skipped; invalid descriptors and symlinked skill roots/descriptors are errors.
+`validate <directory>` checks one skill without requiring repository configuration.
+
+`status` shows the repository, skill count and registered installation paths.
+Each entry is classified as `ok`, `missing`, `broken`, `replaced`,
+`previous-repository`, or `unresolved`. It checks recorded paths, without
+inventorying other skills in the client directory.
+
+Local `installations.json` uses schema v2, keyed by the full use path, with
+`skill`, `target`, `path`, and `sourcePath` fields. Multiple paths for one skill
+remain separate. Arbitrary paths absorbed by `add` use target `local-path`;
+Codex installations use `codex`. There is no commit field or version lock.
+
+## Migrating old configuration
+
+With a schema v1 registry configuration, `status` displays migration guidance;
+use `init --repo <local-repo>` explicitly. Initialization preserves uniquely
+named `config.json.*.bak` and `installations.json.*.bak` beside the originals,
+then converts the configuration and installation records together. If writing
+fails, it restores their previous contents; failed recovery reports the saved
+backups.
+
+Old installation source paths are recovered only when an actual link matches a
+known old repository from configuration or its backups. Otherwise the record is
+preserved with an unknown source and cannot authorize `--force`. M1's previously
+unversioned records can also be read without modification; their first update
+preserves a backup before writing schema v2.
+
+Prepare and compare a new repository yourself before changing the binding.
+Use `status` to inspect remaining old-source links. Standard Codex paths can be
+relinked using the verified `install --force` flow; arbitrary original paths
+can be updated manually. Keep old content until all intended links are checked.
+Existing `skill-sync.json` files are retained and ignored by local management.
+
+## Remaining legacy commands
+
+The earlier `publish` and `sync` commands remain legacy operations until M3;
+they do not accept v2 local repository configuration. The local init/add/install/
+list/status flow never stages, commits, fetches, pulls, pushes or sets Git
+identity. See the [personal repository plan](../../docs/skill-sync-personal-repository-plan.md)
 for milestone scope and acceptance records.

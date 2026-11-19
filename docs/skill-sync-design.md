@@ -9,7 +9,8 @@
 2026-11-20 的职责调整另见
 [个人仓库纳管与软链接安装方案](skill-sync-personal-repository-plan.md)：
 目标是由用户维护独立个人仓库，工具仅负责本地纳管和安装，Git 提交与推送由用户自行完成。
-其中 M1 已提供本地仓库配置与 SKILL.md 发现；add/install 改造及移除 publish/sync 仍待后续阶段。
+其中 M1/M2 已提供本地仓库配置、SKILL.md 发现、add 纳管与软链接安装；
+移除旧 publish/sync 路径仍待 M3。
 
 日期：2026-08-09
 

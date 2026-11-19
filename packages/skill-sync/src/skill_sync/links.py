@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def link_directory(destination: Path, source: Path) -> Generator[None]:
+def link_directory(destination: Path, source: Path) -> Generator[Path | None]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     backup_root = Path(mkdtemp(prefix=".skill-sync-backup-", dir=destination.parent))
     backup = backup_root / "original"
@@ -26,7 +26,7 @@ def link_directory(destination: Path, source: Path) -> Generator[None]:
         try:
             destination.symlink_to(source.resolve(), target_is_directory=True)
             linked = True
-            yield
+            yield backup if had_original else None
         except BaseException:
             try:
                 if linked:

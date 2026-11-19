@@ -3,11 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from skill_sync.catalog import find_skill
-from skill_sync.config import Config, InstallationRecord, read_installations, write_installations
+from skill_sync.catalog import find_local_skill
 from skill_sync.errors import SkillSyncError, TargetSkillExistsError
-from skill_sync.git_repo import current_commit
+from skill_sync.installations import (
+    ManagedInstallation,
+    read_managed_installations,
+    symlink_target,
+    write_managed_installations,
+)
 from skill_sync.links import link_directory, link_path, require_external_path
+from skill_sync.repository import RepositoryConfig, validate_repository
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,48 +20,55 @@ class InstallResult:
     name: str
     target: str
     path: Path
-    commit: str
+    source_path: Path
 
 
 def install_skill(
     name: str,
-    config: Config,
+    config: RepositoryConfig,
     *,
     target: str,
     force: bool = False,
     target_root: Path | None = None,
 ) -> InstallResult:
     if target != "codex":
-        msg = "MVP only supports --target codex."
+        msg = "Only --target codex is supported."
         raise SkillSyncError(msg)
-
-    registry_skill = find_skill(config.checkout, name)
-    commit = current_commit(config.checkout)
+    validate_repository(config.repository_path, config.state_home)
+    skill = find_local_skill(config.repository_path, name)
     skills_root = (Path.home() / ".agents" / "skills") if target_root is None else target_root
     destination = link_path(skills_root / name)
-    already_linked = (
-        destination.is_symlink() and destination.resolve() == registry_skill.path.resolve()
-    )
-    if (destination.exists() or destination.is_symlink()) and not already_linked and not force:
-        msg = f"Target skill already exists: {destination}. Pass --force to overwrite it."
-        raise TargetSkillExistsError(msg)
-    if not already_linked:
-        require_external_path(destination, config.checkout)
-
-    records = read_installations(config.state_home)
-    records[f"{target}:{name}"] = InstallationRecord(
-        skill=name,
-        target=target,
-        commit=commit,
-        path=destination,
-    )
+    require_external_path(destination, config.repository_path)
+    source = skill.path
+    records = read_managed_installations(config.state_home)
+    previous = records.get(str(destination))
+    actual = symlink_target(destination)
+    already_linked = actual == source
+    same_skill = destination.is_symlink() and destination.resolve() == source
+    if (destination.exists() or destination.is_symlink()) and not same_skill:
+        owned = (
+            previous is not None
+            and previous.skill == name
+            and previous.path == destination
+            and previous.source_path is not None
+            and actual == previous.source_path
+        )
+        if not owned or not force:
+            detail = (
+                "Pass --force to relink this recorded personal skill."
+                if owned
+                else ("Existing content is not a verified personal skill link; it was preserved.")
+            )
+            msg = f"Target skill already exists: {destination}. {detail}"
+            raise TargetSkillExistsError(msg)
+    records[str(destination)] = ManagedInstallation(name, target, destination, source)
     try:
         if already_linked:
-            write_installations(records, config.state_home)
+            write_managed_installations(records, config.state_home)
         else:
-            with link_directory(destination, registry_skill.path):
-                write_installations(records, config.state_home)
+            with link_directory(destination, source):
+                write_managed_installations(records, config.state_home)
     except OSError as exc:
         msg = f"Failed to link skill {destination}: {exc}"
         raise SkillSyncError(msg) from exc
-    return InstallResult(name=name, target=target, path=destination, commit=commit)
+    return InstallResult(name=name, target=target, path=destination, source_path=source)

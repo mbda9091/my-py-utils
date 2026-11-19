@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from skill_sync.config import config_path, init_config, installations_path
+from skill_sync.config import LOCAL_SCHEMA_VERSION, config_path, init_config, installations_path
 from skill_sync.errors import LegacyConfigError, SkillSyncError
 from skill_sync.git_repo import run_git
 from skill_sync.repository import init_repository, read_repository_config
@@ -58,7 +58,16 @@ def test_rebinding_replaces_single_path_and_preserves_old_state(tmp_path: Path) 
     state = tmp_path / "state"
     init_repository(first, state_home=state)
     original_config = config_path(state).read_bytes()
-    original_records = b'{"old-record": {"opaque": true}}\n'
+    original_records = json.dumps(
+        {
+            "codex:foo": {
+                "skill": "foo",
+                "target": "codex",
+                "commit": "abc",
+                "path": str(tmp_path / "installed/foo"),
+            }
+        }
+    ).encode()
     installations_path(state).write_bytes(original_records)
     (first / "skills" / "keep.txt").write_text("Keep\n")
 
@@ -68,7 +77,9 @@ def test_rebinding_replaces_single_path_and_preserves_old_state(tmp_path: Path) 
     assert len(list(state.glob("config.json.*.bak"))) == 1
     assert next(state.glob("config.json.*.bak")).read_bytes() == original_config
     assert next(state.glob("installations.json.*.bak")).read_bytes() == original_records
-    assert installations_path(state).read_bytes() == original_records
+    assert (
+        json.loads(installations_path(state).read_text())["schemaVersion"] == LOCAL_SCHEMA_VERSION
+    )
     assert (first / "skills" / "keep.txt").read_text() == "Keep\n"
     assert list(json.loads(config_path(state).read_text())) == ["repositoryPath", "schemaVersion"]
 
@@ -79,7 +90,16 @@ def test_legacy_config_requires_explicit_binding_and_is_backed_up(tmp_path: Path
     (legacy.checkout / "skills").mkdir(parents=True)
     (legacy.checkout / "skills" / "keep.txt").write_text("Legacy content\n")
     before = config_path(state).read_bytes()
-    records = b'{"codex:foo": {"path": "old-path"}}\n'
+    records = json.dumps(
+        {
+            "codex:foo": {
+                "skill": "foo",
+                "target": "codex",
+                "commit": "abc",
+                "path": str(tmp_path / "installed/foo"),
+            }
+        }
+    ).encode()
     installations_path(state).write_bytes(records)
 
     with pytest.raises(LegacyConfigError, match="init --repo"):
@@ -91,7 +111,9 @@ def test_legacy_config_requires_explicit_binding_and_is_backed_up(tmp_path: Path
 
     assert next(state.glob("config.json.*.bak")).read_bytes() == before
     assert next(state.glob("installations.json.*.bak")).read_bytes() == records
-    assert installations_path(state).read_bytes() == records
+    assert (
+        json.loads(installations_path(state).read_text())["schemaVersion"] == LOCAL_SCHEMA_VERSION
+    )
     assert (legacy.checkout / "skills" / "keep.txt").read_text() == "Legacy content\n"
     assert read_repository_config(state).repository_path == repository
 
