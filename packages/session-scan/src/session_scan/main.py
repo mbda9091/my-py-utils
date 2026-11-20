@@ -6,16 +6,27 @@ import os
 
 from .discovery import discover
 from .models import normalize
+from .selection import compile_filters, select_files
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Discover DSH/Codex session files as JSON (M1: metadata only)."
+        description="Find DSH/Codex session files by directory and message time; output JSON."
     )
     parser.add_argument("--source", choices=("all", "codex", "dsh"), default="all")
     parser.add_argument("--codex-home")
     parser.add_argument("--dsh-root")
+    parser.add_argument("--directory", action="append", default=[])
+    parser.add_argument("--exact-directory", action="store_true")
+    parser.add_argument("--since", help="Inclusive message time; date or timezone-aware ISO 8601")
+    parser.add_argument("--until", help="Inclusive date, or exclusive timezone-aware ISO 8601 time")
     args = parser.parse_args(argv)
+    try:
+        filters = compile_filters(
+            args.directory, exact=args.exact_directory, since=args.since, until=args.until
+        )
+    except ValueError as error:
+        parser.error(str(error))
     for name in ("codex_home", "dsh_root"):
         value: str | None = getattr(args, name)
         if value is not None and (not value.strip() or not normalize(value).is_dir()):
@@ -23,10 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     codex_home = normalize(args.codex_home or os.environ.get("CODEX_HOME") or "~/.codex")
     dsh_root = normalize(args.dsh_root or "~/.dsh/sessions")
     try:
-        result = discover(
+        found = discover(
             codex_home=codex_home if args.source != "dsh" else None,
             dsh_root=dsh_root if args.source != "codex" else None,
         )
+        entries, summary, errors = select_files(found, filters)
         available = any(
             root.is_dir()
             for root in (
@@ -38,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
                 + ([dsh_root] if args.source != "codex" else [])
             )
         )
-        code = 2 if not available else int(bool(result.errors))
+        code = 2 if not available else int(bool(errors))
         print(
             json.dumps(
                 {
@@ -48,14 +60,11 @@ def main(argv: list[str] | None = None) -> int:
                     else "partial_failure"
                     if code == 1
                     else "invalid_source",
-                    "filters": {"source": args.source},
-                    "results": [session.as_json() for session in result.files],
-                    "summary": {
-                        "candidate_files": result.candidates,
-                        "matched_files": len(result.files),
-                    },
-                    "warnings": [issue.as_json() for issue in result.warnings],
-                    "errors": [issue.as_json() for issue in result.errors],
+                    "filters": {"source": args.source, **filters.as_json()},
+                    "results": entries,
+                    "summary": summary,
+                    "warnings": [issue.as_json() for issue in found.warnings],
+                    "errors": [issue.as_json() for issue in errors],
                 },
                 ensure_ascii=False,
             )

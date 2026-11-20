@@ -19,6 +19,9 @@ CONTEXT_SOURCES = {
     "webhook",
     "agent-message",
     "working-directory",
+    "runtime-context",
+    "time-context",
+    "tool-jobs",
 }
 
 if TYPE_CHECKING:
@@ -94,6 +97,7 @@ def _seed_cut(reader: SessionReader, header: Header) -> int | None:
     if not reader.complete:
         return None
     if cut is None:
+        reader.complete = False
         reader.errors.append(
             Issue("missing_seed_boundary", reader.path, "Seeded history has no inherited boundary")
         )

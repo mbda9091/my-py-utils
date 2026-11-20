@@ -26,10 +26,16 @@ if TYPE_CHECKING:
 
 
 def _candidates(root: Path, source: Source, result: Discovery) -> Iterator[Path]:
-    if not root.exists():
-        result.warnings.append(Issue("missing_root", root, "Session directory is missing"))
+    try:
+        if not root.exists():
+            result.warnings.append(Issue("missing_root", root, "Session directory is missing"))
+            return
+        allowed = root.resolve()
+    except (OSError, RuntimeError):
+        result.errors.append(
+            Issue("directory_read_error", root, "Cannot inspect session directory")
+        )
         return
-    allowed = root.resolve()
 
     def onerror(_error: OSError) -> None:
         result.errors.append(
@@ -81,9 +87,9 @@ def _file(path: Path, source: Source) -> SessionFile:
 
 def _enrich(home: Path, result: Discovery) -> None:
     database = home / "state_5.sqlite"
-    if not database.exists():
-        return
     try:
+        if not database.exists():
+            return
         with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only=ON")

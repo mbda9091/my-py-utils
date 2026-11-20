@@ -1,17 +1,45 @@
 # session-scan
 
-Discover actual local Codex and DSH session files, returning one JSON object.
-
-M1 provides file discovery, bounded header reads, optional read-only Codex index
-metadata, and the Python lazy message adapter. Directory and message-time CLI
-filters are planned for M2 and are **not available yet**.
+Find actual local Codex and DSH session files by working directory and message
+time, returning one JSON object. Files without an independent record are ignored.
 
 ```bash
 uv run session-scan --source codex --codex-home ~/.codex
 uv run session-scan --source dsh --dsh-root ~/.dsh/sessions
+uv run session-scan --directory ~/Code/project
+uv run session-scan --directory ~/Code/a --directory ~/Code/b --exact-directory
+uv run session-scan --since 2026-11-19 --until 2026-11-20
+uv run session-scan --directory ~/Code/project --since 2026-11-19T10:00:00+08:00
 ```
 
-No format flag is needed. Discovery never scans dialogue to populate JSON fields.
+No format flag is needed. Directory filters match the recorded working directory,
+including descendants by default. Multiple directories use OR; directories and
+time use AND. Paths are normalized lexically, without resolving cwd symlinks or
+folding case; historical directories need not exist.
+
+Date arguments use the system local timezone. `--since` includes its boundary;
+`--until YYYY-MM-DD` includes the entire date, while a timezone-aware ISO 8601
+`--until` is exclusive. Exact datetime arguments must include `Z` or an offset.
+Either boundary may be omitted. Parsed UTC boundaries and local date offsets are
+returned in `filters`, including any daylight-saving differences.
+
+Without time conditions, only headers and necessary index metadata are read.
+With time conditions, directory exclusions happen first; remaining files are
+scanned lazily for an actual user/assistant message in the interval. File mtime
+and index update time do not pre-exclude old messages in a long-running session.
+The first matching message in **file order** stops the scan; results include its
+time, decoded JSONL line number and available ordinal/seq, not a full count or
+transcript. A file with incomplete time information is reported as indeterminate,
+not a confirmed non-match; a valid hit can still be returned with errors.
+
+Output contains `results`, effective `filters`, `summary`, `warnings` and `errors`.
+No matches still returns JSON with an empty results array. Unknown cwd is excluded
+only by directory queries. The summary separates metadata-only reads, body scans,
+early stops, directory exclusions and incomplete time scans; incomplete files can
+also have valid matches, so those counts overlap. Metadata-only results sort by
+last update time; time matches sort by the first encountered hit, descending, then
+by source and absolute path. Message content is never included.
+
 Codex files under `sessions/` and `archived_sessions/` are included, even without
 an index row. Index rows without files are ignored. DSH filenames and headers
 must agree on version 0, 3 or 4; both `.jsonl` and `.jsonl.zstd` are supported.
@@ -46,6 +74,8 @@ Message adapters:
 - DSH 0/3/4: appended `user/message` with source `user`, or appended
   `assistant/message` with source `model`. Configuration, tools, context sources,
   replacements and packed streaming deltas do not themselves count as dialogue.
+  Source-attributed `runtime-context`, `time-context` and `tool-jobs` user-role
+  records are context injections, not human messages.
   Message events use millisecond `time`. Model `replayState` is provider state,
   not an inherited-history flag, and does not suppress a model's live message.
 - Legacy `seedLength` excludes inherited sequence numbers. `isSeeded` without a
