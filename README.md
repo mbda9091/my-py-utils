@@ -19,6 +19,7 @@ packages/
   repo-security/       Repository-local scanners, setup recovery and Git hooks
   codex-hook-ctl/      Record and inject custom Codex hooks by name
   codex-session-export/ Export Codex sessions as normalized rollout JSONL
+  session-scan/        Discover DSH/Codex files; lazy message adapters (M1)
   workspacectl/         Controller for requirement and collaboration Git worktrees
   my-py-utils-cli/      Aggregate installer for all workspace CLI commands
 tests/                  Workspace-level tests
@@ -52,6 +53,7 @@ uv run --package mac-cache-cleaner mac-cache-cleaner --help
 uv run --package node-modules-cleaner node-modules-cleaner ~/Code --dry-run
 uv run --package codex-hook-ctl codex-hook-ctl --help
 uv run --package codex-session-export codex-session-export --directory ~/Code/my-py-utils --output ~/Downloads/codex-export
+uv run --package session-scan session-scan --help
 uv run --package skill-sync skill-sync --help
 uv run --package workspacectl workspacectl --help
 uv run --package private-pack private-pack --help
@@ -112,6 +114,7 @@ mac-cache-cleaner
 node-modules-cleaner
 codex-hook-ctl
 codex-session-export
+session-scan
 skill-sync
 workspacectl
 private-pack
