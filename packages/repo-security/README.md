@@ -82,6 +82,15 @@ an independent native hook. New checks use native registration, not directory
 discovery. The generated fixed-list adapter is machine-local and ignored by Git,
 because its original members remain in the local Git directory.
 Unknown edits are preserved and reported rather than overwritten.
+An owned legacy `core.hooksPath` is removed from its actual local/worktree source
+file. When migration spans both files, setup backs up both, locks both before
+publishing, and activates the native guard before clearing the legacy setting.
+Included, global and ambiguous multi-value settings remain conflicts for review.
+If clearing the owned value would expose the implicit default directory's hooks,
+setup replaces that value with `/dev/null` to keep them inactive; the former
+active project hooks use their new native registrations. A disabled legacy
+dispatcher is removed without enabling its project members.
+Explicit inherited hooksPath settings regain control without being modified.
 The CLI replaces older runtime files only when their bytes still
 match the recorded installation. Existing registered repository rules are kept.
 Unregistered custom files, unsupported versions and corrupt records remain

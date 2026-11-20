@@ -214,6 +214,221 @@ def test_legacy_hooks_path_migration_preserves_other_events(repository: Path) ->
     assert [item["event"] for item in record["native_hooks"]] == ["commit-msg", "pre-commit"]
 
 
+@pytest.mark.parametrize("scope", ["local", "worktree"])
+def test_legacy_hooks_path_is_cleared_from_its_actual_scope(
+    repository: Path, scope: str
+) -> None:
+    write_legacy(repository)
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    git(repository, "config", "--local", "review.shared", "preserved")
+    git(repository, "config", "--worktree", "review.private", "preserved")
+    git(repository, "config", "--" + scope, "core.hooksPath", manage.HOOKS_PATH)
+    original_configs = {
+        name: (repository / ".git" / name).read_bytes()
+        for name in ("config", "config.worktree")
+    }
+    setup_repository(repository)
+    for selected in ("local", "worktree"):
+        assert (
+            git(repository, "config", "--" + selected, "--get", "core.hooksPath", check=False)
+            .returncode
+            == 1
+        )
+    assert git(repository, "config", "--get", "core.hooksPath", check=False).returncode == 1
+    assert git(repository, "config", "--get", "review.shared").stdout.strip() == "preserved"
+    assert git(repository, "config", "--get", "review.private").stdout.strip() == "preserved"
+    assert not (repository / manage.HOOK_ENTRY).exists()
+    assert not (repository / manage.HOOK_LINK).is_symlink()
+    assert git(repository, "hook", "list", "-z", "pre-commit").stdout == "repo-security\0"
+    assert manage.hooks_enabled(repository, manage.hooks_state(repository))
+    record = manage.read_record(repository)
+    assert record
+    assert record["status"] == "ready"
+    assert "hook_scope" in record
+    assert record["hook_scope"] == "worktree"
+    assert "migration_backup" in record
+    backup = repository / record["migration_backup"] / "files/.git"
+    for name, content in original_configs.items():
+        assert (backup / name).read_bytes() == content
+    before = installation.snapshot(repository)
+    setup_repository(repository)
+    assert installation.snapshot(repository) == before
+
+
+def test_shared_legacy_config_lock_prevents_partial_publication(repository: Path) -> None:
+    write_legacy(repository)
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    git(repository, "config", "--local", "core.hooksPath", manage.HOOKS_PATH)
+    lock = repository / ".git/config.lock"
+    lock.write_text("another writer\n")
+    common = (repository / ".git/config").read_bytes()
+    with pytest.raises(RepoSecurityError, match="locked by another writer"):
+        setup_repository(repository)
+    assert (repository / ".git/config").read_bytes() == common
+    assert lock.read_text() == "another writer\n"
+    assert not (repository / ".git/config.worktree").exists()
+    assert not (repository / ".git/config.worktree.lock").exists()
+    record = manage.read_record(repository)
+    assert record
+    assert record["status"] == "incomplete"
+    lock.unlink()
+    setup_repository(repository)
+    assert git(repository, "config", "--get", "core.hooksPath", check=False).returncode == 1
+    assert manage.hooks_enabled(repository, manage.hooks_state(repository))
+
+
+def test_shared_legacy_config_change_is_preserved_before_publication(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_legacy(repository)
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    git(repository, "config", "--local", "core.hooksPath", manage.HOOKS_PATH)
+    original = hook_config.hooks_state
+
+    def changed(root: Path) -> hook_config.HooksState:
+        if (root / ".git/config.lock").exists():
+            with (root / ".git/config").open("a") as stream:
+                stream.write("[review]\n\texternal = preserved\n")
+        return original(root)
+
+    monkeypatch.setattr(hook_config, "hooks_state", changed)
+    with pytest.raises(RepoSecurityError, match="changed during setup"):
+        setup_repository(repository)
+    assert git(repository, "config", "--get", "review.external").stdout.strip() == "preserved"
+    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == manage.HOOKS_PATH
+    assert not (repository / ".git/config.worktree").exists()
+    assert not (repository / ".git/config.lock").exists()
+    assert not (repository / ".git/config.worktree.lock").exists()
+
+
+def test_shared_legacy_config_publication_failure_is_retryable(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_legacy(repository)
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    git(repository, "config", "--local", "core.hooksPath", manage.HOOKS_PATH)
+    original = Path.replace
+    failed = False
+
+    def replace(source: Path, target: str | Path) -> Path:
+        nonlocal failed
+        if source == repository / ".git/config.lock" and not failed:
+            failed = True
+            msg = "Synthetic shared configuration publication failure"
+            raise OSError(msg)
+        return original(source, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    with pytest.raises(OSError, match="publication failure"):
+        setup_repository(repository)
+    record = manage.read_record(repository)
+    assert record
+    assert record["status"] == "incomplete"
+    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == manage.HOOKS_PATH
+    assert (
+        git(repository, "config", "--worktree", "--get", "hook.repo-security.event").stdout.strip()
+        == "pre-commit"
+    )
+    assert not (repository / ".git/config.lock").exists()
+    assert not (repository / ".git/config.worktree.lock").exists()
+    with pytest.raises(RepoSecurityError, match="not ready"):
+        manage.require_commit_ready(repository)
+    setup_repository(repository)
+    assert git(repository, "config", "--get", "core.hooksPath", check=False).returncode == 1
+    assert manage.hooks_enabled(repository, manage.hooks_state(repository))
+
+
+@pytest.mark.parametrize("source", ["include", "multiple", "multiple-scopes"])
+def test_legacy_path_with_unowned_source_values_is_preserved(
+    repository: Path, source: str
+) -> None:
+    write_legacy(repository)
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    if source == "include":
+        included = repository / ".git/included config"
+        included.write_text("[core]\n\thooksPath = .security/hooks\n")
+        git(repository, "config", "include.path", str(included))
+    elif source == "multiple":
+        git(repository, "config", "--add", "core.hooksPath", "other-hooks")
+        git(repository, "config", "--add", "core.hooksPath", manage.HOOKS_PATH)
+    else:
+        git(repository, "config", "--local", "core.hooksPath", manage.HOOKS_PATH)
+        git(repository, "config", "--worktree", "core.hooksPath", manage.HOOKS_PATH)
+    before = installation.snapshot(repository)
+    with pytest.raises(RepoSecurityError, match="owned legacy record"):
+        setup_repository(repository)
+    assert installation.snapshot(repository) == before
+
+
+@pytest.mark.parametrize("worktree_config", [False, True])
+def test_disabled_dispatcher_is_removed_without_enabling_project_checks(
+    repository: Path, *, worktree_config: bool
+) -> None:
+    write_legacy(repository)
+    if worktree_config:
+        git(repository, "config", "extensions.worktreeConfig", "true")
+    (repository / manage.HOOK_ENTRY).chmod(0o644)
+    project = repository / ".git/hooks/pre-commit.d/20-project"
+    executable(project, "echo must-not-run > .git/disabled-project-trace\nexit 7\n")
+    before = project.read_bytes(), project.stat().st_mode, project.stat().st_mtime_ns
+    setup_repository(repository)
+    assert not (repository / manage.HOOK_ENTRY).exists()
+    assert not (repository / manage.HOOK_LINK).is_symlink()
+    assert not (repository / hook_config.MIGRATED_CHECKS).exists()
+    assert (project.read_bytes(), project.stat().st_mode, project.stat().st_mtime_ns) == before
+    assert git(repository, "hook", "list", "-z", "pre-commit").stdout == "repo-security\0"
+    # Replace only the fixture's security command; verify real Git runs no project member.
+    git(repository, "-c", "hook.repo-security.command=true", "hook", "run", "pre-commit")
+    assert not (repository / ".git/disabled-project-trace").exists()
+
+
+@pytest.mark.parametrize("worktree_config", [False, True])
+def test_legacy_path_cleanup_keeps_default_hooks_hidden(
+    repository: Path, *, worktree_config: bool
+) -> None:
+    write_legacy(repository)
+    git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
+    if worktree_config:
+        git(repository, "config", "extensions.worktreeConfig", "true")
+    hidden = repository / ".git/hooks/commit-msg"
+    active = repository / ".security/hooks/commit-msg"
+    executable(hidden, "echo hidden >> .git/message-trace\n")
+    executable(active, 'printf "active:%s\\n" "$1" >> .git/message-trace\n')
+    before = hidden.read_bytes(), hidden.stat().st_mode, hidden.stat().st_mtime_ns
+    setup_repository(repository)
+    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == os.devnull
+    assert not (repository / manage.HOOK_ENTRY).exists()
+    assert not (repository / manage.HOOK_LINK).is_symlink()
+    assert git(repository, "hook", "list", "-z", "pre-commit").stdout == "repo-security\0"
+    git(repository, "hook", "run", "commit-msg", "--", "message with spaces")
+    assert (repository / ".git/message-trace").read_text() == "active:message with spaces\n"
+    assert (hidden.read_bytes(), hidden.stat().st_mode, hidden.stat().st_mtime_ns) == before
+    snapshot = installation.snapshot(repository)
+    setup_repository(repository)
+    assert installation.snapshot(repository) == snapshot
+
+
+def test_legacy_path_cleanup_restores_explicit_global_hook_manager(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    write_legacy(repository)
+    config = tmp_path / "global-config"
+    config.write_text("[core]\n\thooksPath = global-hooks\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
+    hidden = repository / "global-hooks/commit-msg"
+    executable(hidden, "echo inherited-manager > .git/global-hook-trace\n")
+    before = config.read_bytes(), config.stat().st_mtime_ns
+    setup_repository(repository)
+    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == "global-hooks"
+    assert (
+        git(repository, "config", "--local", "--get", "core.hooksPath", check=False).returncode == 1
+    )
+    git(repository, "hook", "run", "commit-msg")
+    assert (repository / ".git/global-hook-trace").read_text() == "inherited-manager\n"
+    assert (config.read_bytes(), config.stat().st_mtime_ns) == before
+
+
 def test_global_hooks_path_and_unrelated_disabled_hook_are_preserved(
     repository: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
