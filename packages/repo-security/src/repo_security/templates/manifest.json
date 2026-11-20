@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "template_version": "0.2.0",
+  "template_version": "0.3.0",
   "source": "<normal-workspace>/code-security-template",
   "imported_on": "2026-11-17",
   "source_license": "No license file supplied; user-directed migration for this personal repository. No public redistribution license inferred.",
@@ -10,7 +10,7 @@
       "source_sha256": null,
       "resource": "setup.sh.template",
       "destination": ".security/setup.sh",
-      "sha256": "5f686cc771458166490b471ce603323e2cd714276aedf61b39fb4604b8d7734e",
+      "sha256": "e14ff64efe5cf249c2d8064216890e7c6429868aea087fcad0b2113f2f7ae47f",
       "executable": true
     },
     {
@@ -18,7 +18,7 @@
       "source_sha256": "a57846f9af8a701ddc7da2bf3d192992f97a6a6453acddcccfbfa13aa655b2d7",
       "resource": "setup.py.template",
       "destination": ".security/setup.py",
-      "sha256": "e938fe43ee86e790127d5a8d18d63f5edb80c35aab7276c818e8cc84feed5296",
+      "sha256": "aa567762f13d5317c25a185dea0bfc240b2c8281d6a077a6819398f05209a208",
       "executable": false
     },
     {
@@ -90,7 +90,7 @@
       "source_sha256": "3bcd98004cf274f1dda23b1803b2761b834ebccea810dacedfa9205354cd48b6",
       "resource": "hooks/pre-commit.template",
       "destination": ".security/hooks/pre-commit",
-      "sha256": "6b1a72728c01f69f66ba5ccf3749c2ded3cc4afea899f7976a66e2028a801f4c",
+      "sha256": "cb3dd6f4b2302c5d50338e10ea26a844c35ce3208282fd4dd95325fa502105f7",
       "executable": true
     },
     {
@@ -114,7 +114,15 @@
       "source_sha256": null,
       "resource": "manage.py",
       "destination": ".security/manage.py",
-      "sha256": "b758a4a4c6b97af6774434b6d3c6ad6d37714e7d0a3581f9af906550e4d12a81",
+      "sha256": "b2a2e4c83cb7b79c8732a1e60eea2c886c8ab8474866c778d1753f9033b1198a",
+      "executable": false
+    },
+    {
+      "source": null,
+      "source_sha256": null,
+      "resource": "hook_config.py",
+      "destination": ".security/hook_config.py",
+      "sha256": "c189be2b7fafbf815980a542108d0d6a98590460e5ad7e056f764c8ca6b737dd",
       "executable": false
     }
   ]

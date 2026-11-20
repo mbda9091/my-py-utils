@@ -36,7 +36,6 @@ real_scanners = fixtures.real_scanners
         "missing_gitleaks",
         "changed_gitleaks",
         "nonexecutable_gitleaks",
-        "legacy_push",
     ],
 )
 def test_unready_installation_blocks_real_commit(  # noqa: C901, PLR0912, PLR0915 -- explicit failure matrix
@@ -49,7 +48,7 @@ def test_unready_installation_blocks_real_commit(  # noqa: C901, PLR0912, PLR091
     sample.write_text("print('baseline')\n")
     git(root, "add", "sample.py")
     # Establish HEAD in this disposable fixture before damaging its installation.
-    git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "Fixture baseline")
+    git(root, "commit", "--no-verify", "-qm", "Fixture baseline")
     before = git(root, "rev-parse", "HEAD").stdout.strip()
     sample.write_text("print('safe change')\n")
     git(root, "add", "sample.py")
@@ -125,18 +124,47 @@ def test_ready_guard_requires_security_member(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(manage, "version", manage.SCANNER_VERSIONS.__getitem__)
-    (real_scanners / manage.HOOK_LINK).unlink()
+    git(real_scanners, "config", "--unset-all", "hook.repo-security.event")
     with pytest.raises(RepoSecurityError, match="hooks are not enabled"):
         manage.require_commit_ready(real_scanners)
-    assert not (real_scanners / manage.HOOK_LINK).exists()
+    assert (
+        git(
+            real_scanners, "config", "--get-all", "hook.repo-security.event", check=False
+        ).returncode
+        == 1
+    )
 
 
-def test_setup_refuses_to_silently_keep_legacy_push_hook(
+def test_partial_commit_scans_its_own_index(real_scanners: Path) -> None:
+    root = real_scanners
+    first, second = root / "first.py", root / "second.py"
+    first.write_text("print('original')\n")
+    second.write_text("print('original')\n")
+    git(root, "add", "first.py", "second.py")
+    git(root, "commit", "--no-verify", "-qm", "Fixture baseline")
+    first.write_text("result = eval(user_input)\n")
+    git(root, "add", "first.py")
+    second.write_text("print('safe partial commit')\n")
+    clean = git(
+        root, "commit", "--only", "-qm", "Safe partial commit", "--", "second.py", check=False
+    )
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert git(root, "show", "HEAD:first.py").stdout == "print('original')\n"
+    before = git(root, "rev-parse", "HEAD").stdout
+    blocked = git(
+        root, "commit", "--only", "-qm", "Unsafe partial commit", "--", "first.py", check=False
+    )
+    assert blocked.returncode != 0
+    assert "Semgrep:" in blocked.stdout + blocked.stderr
+    assert git(root, "rev-parse", "HEAD").stdout == before
+
+
+def test_unrelated_pre_push_script_is_preserved(
     repository: Path,
 ) -> None:
     path = repository / ".security/hooks/pre-push"
     path.parent.mkdir(parents=True)
     path.write_text("#!/bin/sh\nexit 0\n")
     plan = manage.make_plan(repository, template_files())
-    assert any("Legacy pre-push hook" in conflict for conflict in plan.conflicts)
+    assert not plan.conflicts
     assert path.read_text() == "#!/bin/sh\nexit 0\n"

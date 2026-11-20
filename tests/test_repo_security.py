@@ -109,7 +109,7 @@ def test_invalid_repository_is_rejected(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "kind",
-    ["existing", "symlink", "ignore-symlink", "hook", "hooks-path", "global-hooks-path"],
+    ["existing", "symlink", "ignore-symlink"],
 )
 def test_setup_conflicts_do_not_write(
     repository: Path,
@@ -167,33 +167,17 @@ def real_scanners(repository: Path) -> Path:
     (security / ".venv").symlink_to(runtime / ".venv", target_is_directory=True)
     (security / "bin").mkdir()
     os.link(runtime / "bin/gitleaks", security / "bin/gitleaks")
-    (repository / manage.HOOK_LINK).parent.mkdir()
-    (repository / manage.HOOK_LINK).symlink_to(manage.HOOK_TARGET)
-    dispatcher = repository / manage.HOOK_ENTRY
-    dispatcher.write_bytes(manage.HOOK_DISPATCHER)
-    dispatcher.chmod(0o755)
+    plan = manage.make_plan(repository, template_files())
+    record = manage.record_for(plan)
+    record["status"] = record["phase"] = "ready"
     # Register this isolated fixture; only dependencies are shared with the real runtime.
-    record: manage.InstallRecord = {
-        "schema_version": 1,
-        "template_version": manage.TEMPLATE_VERSION,
-        "status": "ready",
-        "phase": "ready",
-        "files": {
-            item.destination: {
-                "template_sha256": item.digest,
-                "installed_sha256": item.digest,
-                "executable": item.executable,
-            }
-            for item in template_files()
-        },
-        "original_local_hooks": [],
-        "gitleaks": {
-            "version": manage.GITLEAKS_VERSION,
-            "archive_sha256": manage.CHECKSUMS[(platform.system(), platform.machine())],
-            "sha256": hashlib.sha256((security / "bin/gitleaks").read_bytes()).hexdigest(),
-        },
+    record["gitleaks"] = {
+        "version": manage.GITLEAKS_VERSION,
+        "archive_sha256": manage.CHECKSUMS[(platform.system(), platform.machine())],
+        "sha256": hashlib.sha256((security / "bin/gitleaks").read_bytes()).hexdigest(),
     }
     (security / "install-manifest.json").write_text(json.dumps(record))
+    manage.hook_config.activate_hooks(repository, plan.native)
     return repository
 
 

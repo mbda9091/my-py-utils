@@ -9,6 +9,7 @@ from pathlib import Path
 from repo_security import __version__
 from repo_security.core import doctor_repository, plan_repository, scan_repository, setup_repository
 from repo_security.errors import RepoSecurityError
+from repo_security.templates import hook_config
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2 if plan.conflicts else 0
             root = setup_repository(args.path, github_actions=args.github_actions)
             print(f"Security tools and repository-local hooks verified: {root}")
+            print("Pre-commit order: " + hook_config.hook_order(root))
             print("Review generated files, then run repo-security scan <repo> --mode history.")
             return 0
         if args.command == "doctor":

@@ -24,7 +24,7 @@ ERROR_EXIT = 2
 def commit(root: Path, text: str) -> str:
     (root / "sample.py").write_text(text)
     git(root, "add", "sample.py")
-    git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "Synthetic snapshot")
+    git(root, "commit", "--no-verify", "-qm", "Synthetic snapshot")
     return git(root, "rev-parse", "HEAD").stdout.strip()
 
 

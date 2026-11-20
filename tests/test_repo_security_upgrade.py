@@ -14,6 +14,7 @@ from repo_security.templates import manage
 from tests import test_repo_security as fixtures
 from tests import test_repo_security_install as install_fixtures
 from tests.test_repo_security import git
+from tests.test_repo_security_native import write_legacy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,9 +36,8 @@ def register_file(record: manage.InstallRecord, root: Path, relative: str) -> No
 
 @pytest.fixture
 def old_installation(repository: Path, fake_install: list[Path]) -> Path:
-    setup_repository(repository)
-    record = manage.read_record(repository)
-    assert record
+    record = write_legacy(repository)
+    manage.install_runtime(repository, record)
     (repository / ".security/setup.sh").unlink()
     record["files"].pop(".security/setup.sh")
     previous = repository / ".security/pii.py"
@@ -98,7 +98,7 @@ def checkout_new_release(root: Path) -> None:
     (root / manage.LEGACY_PUSH).unlink()
     git(root, "add", ".security", ".gitignore")
     # A fixture commit models pulling reviewed new files while local installation state stays old.
-    git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "New managed release")
+    git(root, "commit", "--no-verify", "-qm", "New managed release")
 
 
 def test_standalone_adopts_clean_pulled_release_and_migrates_legacy_hooks_path(
@@ -151,7 +151,7 @@ def test_registered_repository_rules_survive_bundle_upgrade(old_installation: Pa
 
 @pytest.mark.parametrize(
     ("target", "registered"),
-    [(manage.HOOK_ENTRY, False), (manage.LEGACY_PUSH, False), (manage.LEGACY_PUSH, True)],
+    [(manage.HOOK_ENTRY, False)],
 )
 def test_modified_legacy_hooks_are_not_replaced(
     old_installation: Path, target: str, *, registered: bool

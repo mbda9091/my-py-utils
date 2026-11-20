@@ -4,12 +4,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 from repo_security.core import setup_repository
-from repo_security.errors import RepoSecurityError
-from repo_security.templates import manage
+from repo_security.templates import hook_config, manage
 
 from tests import test_repo_security as fixtures
 from tests import test_repo_security_install as install_fixtures
 from tests.test_repo_security import git
+from tests.test_repo_security_native import write_legacy
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,14 +38,15 @@ def test_independent_check_runs_before_security_without_modifying_it(
         for name in manage.RUNTIME_NAMES
     }
     executable(
-        root / ".git/hooks/pre-commit.d/20-project",
+        root / ".project-hooks/20-project",
         "echo 'project-check-ran' >&2\nexit " + str(int(reject)) + "\n",
     )
+    register_project(root, "./.project-hooks/20-project")
     (root / "sample.py").write_text("print('safe')\n")
     git(root, "add", "sample.py")
     result = git(root, "commit", "-qm", "Independent checks", check=False)
     output = result.stdout + result.stderr
-    assert ("PASS: 1 unique snapshots, 0 findings." in output) is not reject
+    assert "PASS: 1 unique snapshots, 0 findings." in output
     assert "project-check-ran" in output
     if not reject:
         assert output.index("project-check-ran") < output.index("Checking staged snapshot")
@@ -70,9 +71,10 @@ def test_index_changes_from_other_hooks_are_scanned_before_commit(
     (root / "sample.py").write_text("print('safe before generator')\n")
     git(root, "add", "sample.py")
     executable(
-        root / ".git/hooks/pre-commit.d" / name,
+        root / ".project-hooks" / name,
         "printf '%s\\n' 'phone = \"" + phone + "\"' > sample.py\ngit add -- sample.py\n",
     )
+    register_project(root, "./.project-hooks/" + name)
     result = git(root, "commit", "-qm", "Generated secret must be blocked", check=False)
     output = result.stdout + result.stderr
     assert result.returncode != 0
@@ -82,35 +84,20 @@ def test_index_changes_from_other_hooks_are_scanned_before_commit(
     assert git(root, "rev-parse", "--verify", "HEAD", check=False).returncode != 0
 
 
-@pytest.mark.parametrize(
-    "damage",
-    ["missing-security", "broken-security", "disabled-security", "disabled-extra", "broken-extra"],
-)
-def test_dispatcher_blocks_unusable_checks(repository: Path, damage: str) -> None:
-    root = repository
-    entry = root / manage.HOOK_ENTRY
-    entry.write_bytes(manage.HOOK_DISPATCHER)
-    entry.chmod(0o755)
-    member = root / manage.HOOK_LINK
-    member.parent.mkdir()
-    security = root / ".security/hooks/pre-commit"
-    executable(security, "echo security >> hook-order.txt\n")
-    member.symlink_to(manage.HOOK_TARGET)
+@pytest.mark.parametrize("damage", ["missing-security", "disabled-security"])
+def test_native_registration_blocks_unusable_security_entry(repository: Path, damage: str) -> None:
+    path = repository / ".security/hooks/pre-commit"
+    executable(path, "exit 0\n")
+    git(repository, "config", "hook.repo-security.command", "./.security/hooks/pre-commit")
+    git(repository, "config", "hook.repo-security.event", "pre-commit")
     if damage == "missing-security":
-        member.unlink()
-    elif damage == "broken-security":
-        security.unlink()
-    elif damage == "disabled-security":
-        security.chmod(0o644)
-    elif damage == "disabled-extra":
-        (member.parent / "20-extra").write_text("#!/bin/sh\nexit 0\n")
+        path.unlink()
     else:
-        (member.parent / "20-extra").symlink_to("missing-check")
-    (root / "safe.txt").write_text("safe\n")
-    git(root, "add", "safe.txt")
-    result = git(root, "commit", "-qm", "Must be blocked", check=False)
-    assert result.returncode != 0
-    assert git(root, "rev-parse", "--verify", "HEAD", check=False).returncode != 0
+        path.chmod(0o644)
+    (repository / "safe.txt").write_text("safe\n")
+    git(repository, "add", "safe.txt")
+    assert git(repository, "commit", "-qm", "Must block", check=False).returncode != 0
+    assert git(repository, "rev-parse", "--verify", "HEAD", check=False).returncode != 0
 
 
 def test_repeat_setup_preserves_independent_hooks(
@@ -118,25 +105,23 @@ def test_repeat_setup_preserves_independent_hooks(
 ) -> None:
     setup_repository(repository)
     paths = [
-        repository / ".git/hooks/pre-commit.d/20-project",
+        repository / ".git/hooks/pre-commit",
         repository / ".git/hooks/commit-msg",
         repository / ".git/hooks/pre-push",
     ]
     for path in paths:
         executable(path, "exit 0\n")
-    protected = [*paths, repository / manage.HOOK_ENTRY, repository / ".security/hooks/pre-commit"]
+    protected = [*paths, repository / ".security/hooks/pre-commit"]
     before = [(path.read_bytes(), path.stat().st_mtime_ns) for path in protected]
-    link_before = (repository / manage.HOOK_LINK).lstat().st_mtime_ns
     setup_repository(repository)
     assert before == [(path.read_bytes(), path.stat().st_mtime_ns) for path in protected]
-    assert (repository / manage.HOOK_LINK).lstat().st_mtime_ns == link_before
     assert manage.hooks_enabled(repository, manage.hooks_state(repository))
     assert fake_install == [repository, repository]
 
 
 @pytest.mark.parametrize("relative", [manage.HOOK_ENTRY, manage.HOOK_LINK])
 @pytest.mark.parametrize("kind", ["file", "link", "broken-link", "directory"])
-def test_setup_preserves_conflicting_hook_entries(
+def test_setup_preserves_other_tools_hook_entries(
     repository: Path, relative: str, kind: str, fake_install: list[Path]
 ) -> None:
     path = repository / relative
@@ -150,8 +135,7 @@ def test_setup_preserves_conflicting_hook_entries(
     else:
         path.mkdir()
     before = path.lstat()
-    with pytest.raises(RepoSecurityError):
-        setup_repository(repository)
+    setup_repository(repository)
     after = path.lstat()
     assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
         after.st_ino,
@@ -159,24 +143,29 @@ def test_setup_preserves_conflicting_hook_entries(
         after.st_mode,
     )
     assert outside.read_text().endswith("exit 0\n")
-    assert not fake_install
-    assert not (repository / ".security").exists()
+    assert fake_install == [repository]
+    assert (repository / ".security").exists()
 
 
 def test_setup_migrates_only_legacy_local_hooks_path(
     repository: Path, fake_install: list[Path]
 ) -> None:
+    write_legacy(repository)
     git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
     setup_repository(repository)
     state = manage.hooks_state(repository)
     assert state.effective is None
     assert not state.local
     assert manage.hooks_enabled(repository, state)
-    assert str((repository / manage.HOOK_LINK).readlink()) == manage.HOOK_TARGET
-    assert (repository / manage.HOOK_LINK).resolve() == repository / ".security/hooks/pre-commit"
+    assert not (repository / manage.HOOK_LINK).is_symlink()
+    assert not (repository / manage.HOOK_ENTRY).exists()
     record = manage.read_record(repository)
     assert record
-    assert record["original_local_hooks"] == [manage.HOOKS_PATH]
+    assert record["original_local_hooks"] == []
+    assert "migration_backup" in record
+    assert (
+        '".security/hooks"' in (repository / record["migration_backup"] / "backup.json").read_text()
+    )
     assert fake_install == [repository]
 
 
@@ -186,15 +175,22 @@ def test_migration_does_not_shadow_inherited_hook_manager(
     config = repository / "global.gitconfig"
     config.write_text("[core]\n\thooksPath = .external-hooks\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    write_legacy(repository)
     git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
-    with pytest.raises(RepoSecurityError, match="did not take effect"):
-        setup_repository(repository)
+    setup_repository(repository)
     assert (
-        git(repository, "config", "--local", "--get", "core.hooksPath").stdout.strip()
-        == manage.HOOKS_PATH
+        git(repository, "config", "--local", "--get", "core.hooksPath", check=False).returncode == 1
     )
     assert (
         git(repository, "config", "--global", "--get", "core.hooksPath").stdout.strip()
         == ".external-hooks"
     )
-    assert not fake_install
+    assert fake_install == [repository]
+
+
+def register_project(root: Path, command: str) -> None:
+    git(root, "config", "hook.project.command", command)
+    git(root, "config", "hook.project.event", "pre-commit")
+    record = manage.read_record(root)
+    assert record
+    hook_config.activate_hooks(root, hook_config.plan_hooks(root, record))
