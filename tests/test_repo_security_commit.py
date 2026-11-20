@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from importlib.metadata import PackageNotFoundError
 from typing import TYPE_CHECKING
 
@@ -168,3 +169,53 @@ def test_unrelated_pre_push_script_is_preserved(
     plan = manage.make_plan(repository, template_files())
     assert not plan.conflicts
     assert path.read_text() == "#!/bin/sh\nexit 0\n"
+
+
+def test_linked_worktree_hook_uses_its_own_root_and_commit_index(real_scanners: Path) -> None:
+    root = real_scanners
+    (root / "sample.py").write_text("print('baseline')\n")
+    git(root, "add", "sample.py")
+    git(root, "commit", "--no-verify", "-qm", "Main baseline")
+    git(root, "config", "extensions.worktreeConfig", "true")
+    git(root, "config", "--local", "--remove-section", "hook.repo-security")
+    git(root, "config", "--worktree", "hook.repo-security.command", "./.security/hooks/pre-commit")
+    git(root, "config", "--worktree", "hook.repo-security.event", "pre-commit")
+    worktree = root.parent / "linked real scanner checkout"
+    git(root, "worktree", "add", "--detach", str(worktree))
+    resources = template_files()
+    for resource in resources:
+        path = worktree / resource.destination
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(resource.content)
+        path.chmod(0o755 if resource.executable else 0o644)
+    security = worktree / ".security"
+    (security / ".venv").symlink_to(root / ".security/.venv", target_is_directory=True)
+    (security / "bin").mkdir()
+    os.link(root / ".security/bin/gitleaks", security / "bin/gitleaks")
+    plan = manage.make_plan(worktree, resources)
+    record = manage.record_for(plan)
+    original_record = manage.read_record(root)
+    assert original_record
+    record["gitleaks"] = original_record["gitleaks"]
+    record["status"] = record["phase"] = "ready"
+    manage.save_record(worktree, record)
+    manage.hook_config.activate_hooks(worktree, plan.native)
+    main_config = (root / ".git/config.worktree").read_bytes()
+    main_head = git(root, "rev-parse", "HEAD").stdout
+    ready = git(worktree, "hook", "run", "pre-commit", check=False)
+    assert ready.returncode == 0, ready.stdout + ready.stderr
+    assert (ready.stdout + ready.stderr).count("Checking staged snapshot") == 1
+    (worktree / "sample.py").write_text("print('safe partial commit')\n")
+    clean = git(worktree, "commit", "--only", "-qm", "Safe linked commit", "--", "sample.py")
+    assert (clean.stdout + clean.stderr).count("Checking staged snapshot") == 1
+    before = git(worktree, "rev-parse", "HEAD").stdout
+    (worktree / "sample.py").write_text("result = eval(user_input)\n")
+    blocked = git(
+        worktree, "commit", "--only", "-qm", "Unsafe linked commit", "--", "sample.py",
+        check=False,
+    )
+    assert blocked.returncode != 0
+    assert "Semgrep:" in blocked.stdout + blocked.stderr
+    assert git(worktree, "rev-parse", "HEAD").stdout == before
+    assert git(root, "rev-parse", "HEAD").stdout == main_head
+    assert (root / ".git/config.worktree").read_bytes() == main_config

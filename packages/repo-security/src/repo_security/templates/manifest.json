@@ -26,7 +26,7 @@
       "source_sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
       "resource": "scan.py.template",
       "destination": ".security/scan.py",
-      "sha256": "35136b8c3e2629a5eb4e3607f7c5b1afc8be503acb93afe3f922e46ff3f47faf",
+      "sha256": "c70c794e6734f12ab091bfadc85de6bae94bc1c83c86e7fbd366c33dd0d72c82",
       "executable": false
     },
     {
@@ -122,7 +122,7 @@
       "source_sha256": null,
       "resource": "hook_config.py",
       "destination": ".security/hook_config.py",
-      "sha256": "c189be2b7fafbf815980a542108d0d6a98590460e5ad7e056f764c8ca6b737dd",
+      "sha256": "d8a412835c76957239a90ceae2ce08e624d29f4ad728673e2b0166414b67b31a",
       "executable": false
     }
   ]

@@ -302,6 +302,48 @@ def test_worktree_configuration_is_isolated(repository: Path) -> None:
     assert manage.read_record(worktree)
 
 
+@pytest.mark.parametrize("isolated", [False, True])
+def test_worktree_preserves_main_legacy_dispatcher(
+    repository: Path, *, isolated: bool
+) -> None:
+    write_legacy(repository)
+    git(repository, "add", ".")
+    git(repository, "commit", "--no-verify", "-qm", "Legacy baseline")
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    worktree = repository.parent / "isolated linked checkout"
+    git(repository, "worktree", "add", "--detach", str(worktree))
+    private_hooks = worktree.parent / "private hooks"
+    if isolated:
+        private_hooks.mkdir()
+        git(worktree, "config", "--worktree", "core.hooksPath", str(private_hooks))
+        # Deploy the reviewed current resources, as after pulling an upgrade.
+        for resource in template_files():
+            if resource.destination not in manage.CUSTOMIZABLE:
+                target = worktree / resource.destination
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(resource.content)
+                if resource.executable:
+                    target.chmod(0o755)
+    before = installation.snapshot(repository)
+    if isolated:
+        setup_repository(worktree)
+        assert git(worktree, "hook", "list", "-z", "pre-commit").stdout == "repo-security\0"
+        assert git(worktree, "config", "--get", "core.hooksPath").stdout.strip() == str(
+            private_hooks
+        )
+    else:
+        with pytest.raises(RepoSecurityError, match="shared security hook"):
+            setup_repository(worktree)
+    after = installation.snapshot(repository)
+    assert {k: v for k, v in after.items() if not k.startswith(".git/worktrees/")} == {
+        k: v for k, v in before.items() if not k.startswith(".git/worktrees/")
+    }
+    assert (repository / manage.HOOK_ENTRY).read_bytes() == (
+        GOLDEN / "dispatcher-current.sh"
+    ).read_bytes()
+    assert (repository / manage.HOOK_LINK).is_symlink()
+
+
 @pytest.mark.parametrize(
     "reported", ["git version 2.53.0", "bad version", "git version 2.54.0.rc1"]
 )

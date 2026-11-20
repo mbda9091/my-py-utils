@@ -201,8 +201,12 @@ yourself; setup does not add allowlists automatically. Bare repositories and
 submodule checkouts are unsupported. Linked worktrees require an already enabled
 `extensions.worktreeConfig` and use their own `config.worktree`, setup lock,
 installation record and scanner environment. Setup does not enable the shared
-extension or delete hooks owned by the main checkout; a shared old security
-entry must first be migrated in its owning checkout. Native Windows is unsupported;
+extension or delete hooks owned by the main checkout. An active shared old security
+entry must first be migrated in its owning checkout. If the checkout already has
+an independent `core.hooksPath`, setup leaves the inactive shared entry untouched
+and configures only this worktree. Preparing that isolation is an explicit
+workspace operation; setup does not change hooksPath to hide existing checks.
+Native Windows is unsupported;
 The observed WSL2 Linux environment does not establish native Windows or
 Windows-mounted filesystem support.
 

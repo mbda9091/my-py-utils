@@ -298,6 +298,13 @@ def _legacy_removals(  # noqa: C901, PLR0912 -- check ownership and active legac
         msg = "Legacy hooks directory is a symlink; preserving it before migration"
         raise RepoSecurityError(msg)
     if state.layout.git_dir != state.layout.common_dir:
+        if (
+            state.effective is not None
+            and (root / state.effective).resolve() != entry.parent.resolve()
+        ):
+            # A private hooksPath already isolates this checkout. The shared
+            # dispatcher is inactive here and remains owned by the main checkout.
+            return [], ()
         msg = "Migrate the main checkout's shared security hook before worktree setup"
         raise RepoSecurityError(msg)
     if not previous:
