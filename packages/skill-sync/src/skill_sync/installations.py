@@ -25,10 +25,26 @@ class ManagedInstallation:
 
 
 def symlink_target(path: Path) -> Path | None:
+    """Return a provable target without following intermediate symlink aliases.
+
+    Parent traversal requires an existing real directory. Missing suffixes are
+    allowed so a recorded direct link into a removed repository stays usable.
+    """
     if not path.is_symlink():
         return None
     target = path.readlink()
-    return Path(os.path.normpath(path.parent / target))
+    absolute = path.absolute().parent / target
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        if part == "..":
+            if not current.is_dir():
+                return None
+            current = current.parent
+        else:
+            current /= part
+            if current.is_symlink():
+                return None
+    return current
 
 
 def read_managed_installations(

@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from skill_sync.cli import main
 from skill_sync.config import (
     config_path,
 )
+from skill_sync.installations import read_managed_installations
 from skill_sync.repository import read_repository_config
 
 from tests.skill_sync_helpers import (
@@ -20,9 +21,6 @@ from tests.skill_sync_helpers import (
     write_legacy_config,
     write_skill,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 ARGPARSE_USAGE_ERROR = 2
 
@@ -92,13 +90,13 @@ def test_cli_install_all_uses_personal_repository(
     write_skill(config.repository_path / "skills", "zeta-skill")
     assert main(["install", "--all", "--target", "codex"]) == 0
     output = capsys.readouterr()
-    assert "Installed: 2; failed: 0" in output.out
+    assert "Installed: 2; skipped: 0; failed: 0" in output.out
     assert output.err == ""
     assert (tmp_path / "home/.agents/skills/alpha-skill").is_symlink()
 
 
 @pytest.mark.parametrize("force", [False, True])
-def test_cli_install_all_preserves_foreign_content_and_reports_partial_failure(
+def test_cli_install_all_preserves_foreign_content_and_warns_about_skipped_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -116,14 +114,130 @@ def test_cli_install_all_preserves_foreign_content_and_reports_partial_failure(
     args = ["install", "--all", "--target", "codex"]
     if force:
         args.append("--force")
-    assert main(args) == 1
+    assert main(args) == 0
     output = capsys.readouterr()
     assert "Installed skill: beta-skill" in output.out
-    assert "Installed: 1; failed: 1" in output.out
+    assert "Installed: 1; skipped: 1; failed: 0" in output.out
+    assert "[WARN] Skipped skill: alpha-skill" in output.err
+    assert "[ERROR]" not in output.err
     assert "preserved" in output.err
     assert not existing.is_symlink()
     assert (existing / "keep.txt").read_text() == "Keep"
     assert (existing.parent / "beta-skill").is_symlink()
+
+
+@pytest.mark.parametrize("kind", ["directory", "file", "link", "broken"])
+@pytest.mark.parametrize("force", [False, True])
+def test_cli_single_install_warns_and_skips_existing_content(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    *,
+    force: bool,
+) -> None:
+    config = make_personal_config(tmp_path)
+    monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    write_skill(config.repository_path / "skills")
+    root = tmp_path / "home/.agents/skills"
+    root.mkdir(parents=True)
+    existing = root / "demo-skill"
+    other = tmp_path / "other"
+    if kind == "directory":
+        existing.mkdir()
+        (existing / "keep.txt").write_text("Keep")
+    elif kind == "file":
+        existing.write_text("Keep")
+    else:
+        if kind == "link":
+            other.mkdir()
+            (other / "keep.txt").write_text("Keep")
+        existing.symlink_to(other, target_is_directory=True)
+    inode = existing.lstat().st_ino
+    args = ["install", "demo-skill", "--target", "codex"]
+    if force:
+        args.append("--force")
+
+    assert main(args) == 0
+
+    output = capsys.readouterr()
+    assert "[WARN] Skipped skill: demo-skill" in output.err
+    assert str(existing) in output.err
+    assert "[ERROR]" not in output.err
+    assert "Installed skill:" not in output.out
+    assert existing.lstat().st_ino == inode
+    assert read_managed_installations(config.state_home) == {}
+    if kind in {"directory", "link"}:
+        assert (existing / "keep.txt").read_text() == "Keep"
+    elif kind == "file":
+        assert existing.read_text() == "Keep"
+    else:
+        assert existing.readlink() == other
+
+
+def test_cli_install_all_can_skip_every_skill_without_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = make_personal_config(tmp_path)
+    monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    names = ("alpha-skill", "beta-skill")
+    for name in names:
+        write_skill(config.repository_path / "skills", name)
+        write_skill(tmp_path / "home/.agents/skills", name)
+
+    assert main(["install", "--all", "--target", "codex"]) == 0
+
+    output = capsys.readouterr()
+    assert "Installed: 0; skipped: 2; failed: 0" in output.out
+    assert output.err.count("[WARN] Skipped skill:") == len(names)
+    assert read_managed_installations(config.state_home) == {}
+
+
+def test_cli_install_all_counts_skips_separately_from_real_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = make_personal_config(tmp_path)
+    monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for name in ("alpha-skill", "beta-skill", "gamma-skill"):
+        write_skill(config.repository_path / "skills", name)
+    existing = write_skill(tmp_path / "home/.agents/skills", "alpha-skill")
+    real_symlink = Path.symlink_to
+
+    def fail_beta_link(path: Path, target: Path, *, target_is_directory: bool) -> None:
+        if target.name == "beta-skill":
+            msg = "link creation failed"
+            raise OSError(msg)
+        real_symlink(path, target, target_is_directory=target_is_directory)
+
+    monkeypatch.setattr(Path, "symlink_to", fail_beta_link)
+
+    assert main(["install", "--all", "--target", "codex"]) == 1
+
+    output = capsys.readouterr()
+    assert "Installed: 1; skipped: 1; failed: 1" in output.out
+    assert "[WARN] Skipped skill: alpha-skill" in output.err
+    assert "[ERROR]" in output.err
+    assert "link creation failed" in output.err
+    assert not existing.is_symlink()
+    assert not (existing.parent / "beta-skill").exists()
+    assert (existing.parent / "gamma-skill").is_symlink()
+    assert len(read_managed_installations(config.state_home)) == 1
+
+
+def test_cli_missing_skill_remains_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = make_personal_config(tmp_path)
+    monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
+
+    assert main(["install", "missing", "--target", "codex"]) == 1
+
+    output = capsys.readouterr()
+    assert "Skill not found" in output.err
+    assert "[WARN]" not in output.err
 
 
 def test_cli_install_requires_skill_name_or_all(capsys: pytest.CaptureFixture[str]) -> None:

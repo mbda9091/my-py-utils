@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -261,12 +262,14 @@ def test_force_rollback_preserves_new_occupant_and_old_link_backup(
     config = init_repository(new.repository_path, state_home=old.state_home)
     before = (config.state_home / "installations.json").read_bytes()
 
-    def create_occupant(path: Path, target: Path, *, target_is_directory: bool) -> None:
-        del target, target_is_directory
-        path.write_text("New occupant")
-        raise FileExistsError
+    real_link = os.link
 
-    monkeypatch.setattr(Path, "symlink_to", create_occupant)
+    def create_occupant(source: Path, target: Path, *, follow_symlinks: bool) -> None:
+        if target == destination:
+            target.write_text("New occupant")
+        real_link(source, target, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr("skill_sync.links.os.link", create_occupant)
     with pytest.raises(SkillSyncError, match="Original data kept at"):
         install_skill("demo-skill", config, target="codex", target_root=root, force=True)
     assert destination.read_text() == "New occupant"

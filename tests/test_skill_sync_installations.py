@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from typing import TYPE_CHECKING
 
@@ -36,9 +37,12 @@ def legacy_record(path: Path, name: str = "demo-skill") -> dict[str, str]:
     return {"skill": name, "target": "codex", "commit": "abc123", "path": str(path)}
 
 
+@pytest.mark.parametrize("relative", [False, True])
 def test_v1_config_and_multiple_use_paths_migrate_with_exact_backups(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    relative: bool,
 ) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
@@ -47,7 +51,8 @@ def test_v1_config_and_multiple_use_paths_migrate_with_exact_backups(
     old_skill = write_skill(old / "skills")
     standard = home / ".agents/skills/demo-skill"
     standard.parent.mkdir(parents=True)
-    standard.symlink_to(old_skill, target_is_directory=True)
+    original_target = os.path.relpath(old_skill, standard.parent) if relative else str(old_skill)
+    standard.symlink_to(original_target, target_is_directory=True)
     custom = tmp_path / "custom/demo-skill"
     custom.parent.mkdir()
     custom.symlink_to(old_skill, target_is_directory=True)
@@ -70,7 +75,7 @@ def test_v1_config_and_multiple_use_paths_migrate_with_exact_backups(
     assert installation_status(records[str(standard)], new) == "previous-repository"
     assert next(state.glob("config.json.*.bak")).read_bytes() == config_before
     assert next(state.glob("installations.json.*.bak")).read_bytes() == raw
-    assert standard.readlink() == old_skill
+    assert str(standard.readlink()) == original_target
     install_skill("demo-skill", config, target="codex", force=True)
     assert standard.readlink() == new / "skills/demo-skill"
     assert custom.readlink() == old_skill
@@ -129,6 +134,36 @@ def test_unknown_legacy_source_cannot_authorize_force(tmp_path: Path) -> None:
     with pytest.raises(SkillSyncError, match="preserved"):
         install_skill("demo-skill", config, target="codex", target_root=root, force=True)
     assert path.readlink() == third_party
+    assert installations_path(config.state_home).read_bytes() == raw
+
+
+def test_legacy_source_with_symlink_parent_traversal_stays_unresolved(tmp_path: Path) -> None:
+    config = make_personal_config(tmp_path)
+    write_skill(config.repository_path / "skills")
+    old_skill = write_skill(tmp_path / "old" / "skills")
+    foreign = write_skill(tmp_path / "foreign")
+    nested = foreign.parent / "nested"
+    nested.mkdir()
+    hop = old_skill.parent / "hop"
+    hop.symlink_to(nested, target_is_directory=True)
+    root = tmp_path / "installed"
+    root.mkdir()
+    path = root / "demo-skill"
+    path.symlink_to(hop / ".." / "demo-skill")
+    raw = json.dumps({"codex:demo-skill": legacy_record(path)}).encode()
+    installations_path(config.state_home).write_bytes(raw)
+    (config.state_home / "config.json.legacy.bak").write_text(
+        json.dumps({"schemaVersion": 1, "checkout": str(old_skill.parent.parent)})
+    )
+
+    record = read_managed_installations(config.state_home)[str(path)]
+
+    assert record.source_path is None
+    assert installation_status(record, config.repository_path) == "unresolved"
+    assert installations_path(config.state_home).read_bytes() == raw
+    with pytest.raises(SkillSyncError, match="preserved"):
+        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+    assert path.resolve() == foreign
     assert installations_path(config.state_home).read_bytes() == raw
 
 

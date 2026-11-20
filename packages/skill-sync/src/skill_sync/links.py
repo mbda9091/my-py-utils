@@ -44,57 +44,84 @@ def link_directory(
     destination: Path, source: Path, *, expected: EntryState | None
 ) -> Generator[Path | None]:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if expected is None:
-        # symlink(2) fails if another actor created any entry, including a directory.
-        destination.symlink_to(source.resolve(), target_is_directory=True)
-        created = entry_state(destination)
-        try:
-            yield None
-        except BaseException:
-            require_entry(destination, created)
-            destination.unlink()
-            raise
-        return
     backup_root = Path(mkdtemp(prefix=".skill-sync-backup-", dir=destination.parent))
     backup = backup_root / "original"
-    committed = False
+    new_link = backup_root / "new-link"
+    preserve = False
+    moved = False
+    published = False
+    created = None
     try:
-        require_entry(destination, expected)
-        linked = False
-        created = None
-        destination.rename(backup)
         try:
-            # Recheck the moved entry: a replacement between check and rename must
-            # be restored, never discarded as a successful installation backup.
-            require_entry(backup, expected)
-            destination.symlink_to(source.resolve(), target_is_directory=True)
-            linked = True
-            created = entry_state(destination)
-            yield backup
+            if expected is not None:
+                require_entry(destination, expected)
+                destination.rename(backup)
+                moved = True
+                require_entry(backup, expected)
+            # Establish identity privately before exposing the link. link(2) with
+            # no following publishes that same symlink inode without overwriting.
+            created = _prepare_link(new_link, source)
+            os.link(new_link, destination, follow_symlinks=False)
+            published = True
+            yield backup if moved else None
         except BaseException:
             try:
-                if linked:
-                    require_entry(destination, created)
-                    destination.unlink()
-                if backup.is_symlink():
-                    # A hard link to the symlink itself restores without overwriting
-                    # a newly created entry at the destination.
-                    os.link(backup, destination, follow_symlinks=False)
-                    backup.unlink()
-                elif not (destination.exists() or destination.is_symlink()):
-                    backup.rename(destination)
-                else:
-                    msg = f"Restore destination is occupied: {destination}"
-                    raise FileExistsError(msg)
+                if published and created is not None:
+                    _withdraw_link(destination, created, backup_root)
+                if moved:
+                    _restore_entry(backup, destination)
             except (OSError, SkillSyncError) as exc:
-                msg = f"Failed to restore {destination}. Original data kept at {backup}: {exc}"
+                preserve = True
+                msg = (
+                    f"Failed to restore {destination}. Original data kept at {backup}; "
+                    f"recovery files kept at {backup_root}: {exc}"
+                )
                 raise SkillSyncError(msg) from exc
             raise
-        else:
-            committed = True
     finally:
-        if committed or not (backup.exists() or backup.is_symlink()):
+        if not preserve:
             shutil.rmtree(backup_root)
+
+
+def _prepare_link(path: Path, source: Path) -> EntryState:
+    path.symlink_to(source.resolve(), target_is_directory=True)
+    created = entry_state(path)
+    if created is None:
+        msg = f"Prepared skill link disappeared: {path}"
+        raise SkillSyncError(msg)
+    return created
+
+
+def _withdraw_link(destination: Path, expected: EntryState, backup_root: Path) -> None:
+    captured = backup_root / "withdrawn"
+    try:
+        destination.rename(captured)
+    except FileNotFoundError:
+        return
+    # Only unlink the captured object in our private directory. An external
+    # replacement at the shared destination must never be deleted by rollback.
+    if entry_state(captured) != expected:
+        location = captured
+        if captured.is_symlink() or captured.is_file():
+            try:
+                _restore_entry(captured, destination)
+                location = destination
+            except FileExistsError:
+                pass
+        msg = f"Skill path changed during rollback; unexpected content preserved at {location}"
+        raise SkillSyncError(msg)
+    captured.unlink()
+
+
+def _restore_entry(backup: Path, destination: Path) -> None:
+    if backup.is_symlink() or backup.is_file():
+        os.link(backup, destination, follow_symlinks=False)
+        backup.unlink()
+    elif not (destination.exists() or destination.is_symlink()):
+        backup.rename(destination)
+    else:
+        msg = f"Restore destination is occupied: {destination}"
+        raise FileExistsError(msg)
 
 
 def link_path(path: Path) -> Path:

@@ -64,7 +64,7 @@ def _install_skill(
     expected = entry_state(destination)
     actual = symlink_target(destination)
     already_linked = actual == source
-    same_skill = destination.is_symlink() and destination.resolve() == source
+    same_skill = _links_to_skill(destination, source)
     if (destination.exists() or destination.is_symlink()) and not same_skill:
         owned = (
             previous is not None
@@ -94,3 +94,14 @@ def _install_skill(
         msg = f"Failed to link skill {destination}: {exc}"
         raise SkillSyncError(msg) from exc
     return InstallResult(name=name, target=target, path=destination, source_path=source)
+
+
+def _links_to_skill(destination: Path, source: Path) -> bool:
+    try:
+        return (
+            destination.is_symlink()
+            and destination.is_dir()
+            and destination.resolve(strict=True) == source
+        )
+    except (OSError, RuntimeError):
+        return False

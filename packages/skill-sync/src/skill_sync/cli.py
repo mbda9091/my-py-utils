@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from skill_sync.adder import add_skill
-from skill_sync.catalog import list_local_skills
+from skill_sync.catalog import find_local_skill, list_local_skill_names
 from skill_sync.config import get_state_home
-from skill_sync.errors import LegacyConfigError, SkillSyncError
+from skill_sync.errors import LegacyConfigError, SkillSyncError, TargetSkillExistsError
 from skill_sync.installations import installation_status, read_managed_installations
 from skill_sync.installer import install_skill
 from skill_sync.locking import mutation_lock
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from skill_sync.installer import InstallResult
     from skill_sync.repository import RepositoryConfig
+    from skill_sync.validation import SkillMetadata
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,9 +80,9 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         output.write(f"Configured personal repository: {config.repository_path}\n")
         output.write(f"configuration: {config.state_home / 'config.json'}\n")
     elif command == "status":
-        _write_status(output)
+        _write_status(output, error_output)
     elif command == "list":
-        _write_list(output)
+        _write_list(output, error_output)
     elif command == "validate":
         metadata = validate_local_skill(args.local_skill_dir)
         output.write("skill structure is valid:\n")
@@ -130,12 +131,16 @@ def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         raise SkillSyncError(msg)
 
     config = read_repository_config()
-    result = install_skill(
-        skill_name,
-        config,
-        target=args.target,
-        force=args.force,
-    )
+    try:
+        result = install_skill(
+            skill_name,
+            config,
+            target=args.target,
+            force=args.force,
+        )
+    except TargetSkillExistsError as exc:
+        error_output.write(f"[WARN] Skipped skill: {skill_name}. {exc}\n")
+        return 0
     _write_install_result(output, result)
     return 0
 
@@ -148,23 +153,28 @@ def _install_all(
     output: TextIO,
     error_output: TextIO,
 ) -> int:
-    skills = list_local_skills(config.repository_path)
-    if not skills:
+    names = list_local_skill_names(config.repository_path)
+    if not names:
         output.write("No skills found.\n")
         return 0
 
     installed = 0
+    skipped = 0
     failed = 0
-    for skill in skills:
+    for name in names:
         try:
-            result = install_skill(skill.name, config, target=target, force=force)
+            result = install_skill(name, config, target=target, force=force)
+        except TargetSkillExistsError as exc:
+            error_output.write(f"[WARN] Skipped skill: {name}. {exc}\n")
+            skipped += 1
+            continue
         except SkillSyncError as exc:
-            error_output.write(f"[ERROR] {exc}\n")
+            error_output.write(f"[ERROR] {name}: {exc}\n")
             failed += 1
             continue
         _write_install_result(output, result)
         installed += 1
-    output.write(f"Installed: {installed}; failed: {failed}\n")
+    output.write(f"Installed: {installed}; skipped: {skipped}; failed: {failed}\n")
     return int(failed > 0)
 
 
@@ -175,7 +185,7 @@ def _write_install_result(output: TextIO, result: InstallResult) -> None:
     output.write(f"source: {result.source_path}\n")
 
 
-def _write_status(output: TextIO) -> None:
+def _write_status(output: TextIO, error_output: TextIO) -> None:
     try:
         config = read_repository_config()
     except LegacyConfigError as exc:
@@ -183,7 +193,10 @@ def _write_status(output: TextIO) -> None:
         return
     output.write(f"repository: {config.repository_path}\n")
     output.write(f"configuration: {config.state_home / 'config.json'}\n")
-    output.write(f"skills: {len(list_local_skills(config.repository_path))}\n")
+    skills, invalid = _inspect_catalog(config, error_output)
+    output.write(f"skills: {len(skills)}\n")
+    if invalid:
+        output.write(f"invalid skills: {invalid}\n")
     records = read_managed_installations(config.state_home)
     output.write(f"installations: {len(records)}\n")
     for record in sorted(records.values(), key=lambda item: str(item.path)):
@@ -192,10 +205,24 @@ def _write_status(output: TextIO) -> None:
         output.write(f"installation: {record.skill}\t{status}\t{record.path}\t{source}\n")
 
 
-def _write_list(output: TextIO) -> None:
+def _write_list(output: TextIO, error_output: TextIO) -> None:
     config = read_repository_config()
-    skills = list_local_skills(config.repository_path)
+    skills, invalid = _inspect_catalog(config, error_output)
     if not skills:
-        output.write("No skills found.\n")
+        output.write("No valid skills found.\n" if invalid else "No skills found.\n")
         return
     output.writelines(f"{skill.name}\t{skill.description}\t{skill.path}\n" for skill in skills)
+
+
+def _inspect_catalog(
+    config: RepositoryConfig, error_output: TextIO
+) -> tuple[list[SkillMetadata], int]:
+    skills: list[SkillMetadata] = []
+    invalid = 0
+    for name in list_local_skill_names(config.repository_path):
+        try:
+            skills.append(find_local_skill(config.repository_path, name))
+        except SkillSyncError as exc:
+            error_output.write(f"[WARN] Invalid skill: {name}. {exc}\n")
+            invalid += 1
+    return skills, invalid

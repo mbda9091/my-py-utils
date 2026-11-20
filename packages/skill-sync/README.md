@@ -96,9 +96,18 @@ unresolved records do not authorize overwriting content. The old source files
 are never deleted by relinking.
 
 The destination is checked again before replacement and after moving the old
-link aside. Content appearing during installation causes a failure and is
-preserved. If restoring an old link would overwrite a new occupant, the original
-link stays in a reported backup for manual recovery.
+link aside. The new link is prepared privately and placed at the destination
+without overwriting existing content. Rollback captures the current entry into
+a private directory before checking its identity; it only deletes the captured
+link when it belongs to this operation. Unexpected files and links are restored
+without overwriting a new occupant. Unexpected directories, occupied restoration
+paths and failed recovery retain their content in a reported backup.
+
+Source verification does not discard `..` before checking the traversed
+directories. Intermediate symlink aliases, cyclic links and parent traversal
+through missing paths or regular files cannot authorize `--force` or recover
+legacy ownership. Ordinary relative links through real directories and recorded
+direct links to a missing old skill or repository remain supported.
 
 `init`, `add`, and `install` share a process lock in the state directory. Concurrent
 commands wait until the current read/modify/write operation, including rollback,
@@ -106,22 +115,37 @@ finishes. Batch installation holds the lock for the batch. This prevents lost
 installation records and races with repository rebinding. The lock file remains
 on disk; the operating system releases the lock when a process exits.
 
-Batch installation continues after individual failures, prints installed/failed
-counts and returns a nonzero status if any skill failed. It only enumerates the
-configured personal repository.
+An existing same-name entry that cannot be relinked is skipped with a `[WARN]`
+message on stderr, including for a single-skill installation and with `--force`.
+Its content and installation records are preserved.
+
+Batch installation continues after skips and individual failures. It reports
+`Installed: N; skipped: N; failed: N` and returns a nonzero status only for real
+failures, such as invalid descriptors, missing skills or link/write errors.
+Each skill is validated inside its own installation attempt: a malformed
+`SKILL.md` counts as one failure and does not block other skills. Conflicts alone
+return success with warnings. It only enumerates the configured personal repository.
 
 ## Discovery and installation records
 
 `list` reads `skills/*/SKILL.md`, verifies directory/name consistency, and prints
 name, description and real path in name order. It needs no publishing metadata
 or installation records. Files and draft directories without a descriptor are
-skipped; invalid descriptors and symlinked skill roots/descriptors are errors.
-`validate <directory>` checks one skill without requiring repository configuration.
+skipped. Invalid descriptors and symlinked skill roots/descriptors produce a
+`[WARN] Invalid skill: <name>` message on stderr; `list` still prints healthy
+skills. If every candidate is invalid, it prints `No valid skills found.`.
+`list` and `status` return success when only individual catalog entries are
+invalid; configuration and repository errors still fail the command.
+`validate <directory>` checks one skill without requiring repository configuration
+and returns failure for invalid content, as does installing that skill explicitly.
 
 `status` shows the repository, skill count and registered installation paths.
 Each entry is classified as `ok`, `missing`, `broken`, `replaced`,
 `previous-repository`, or `unresolved`. It checks recorded paths, without
-inventorying other skills in the client directory.
+inventorying other skills in the client directory. Invalid descriptors do not
+block this output: `skills` counts valid skills, `invalid skills` appears when
+needed, and each invalid skill is named in a warning. Installation statuses
+describe the recorded links independently of descriptor validity.
 
 Local `installations.json` uses schema v2, keyed by the full use path, with
 `skill`, `target`, `path`, and `sourcePath` fields. Multiple paths for one skill

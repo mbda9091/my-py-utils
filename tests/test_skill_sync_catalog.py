@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from skill_sync.catalog import list_local_skills
+from skill_sync.catalog import list_local_skill_names, list_local_skills
 from skill_sync.errors import SkillSyncError
 
 from tests.skill_sync_helpers import make_local_repository, write_skill
@@ -62,3 +62,16 @@ def test_local_catalog_reports_invalid_skill_frontmatter(tmp_path: Path) -> None
 
     with pytest.raises(SkillSyncError, match="description"):
         list_local_skills(repository)
+
+
+def test_candidate_names_include_invalid_descriptors_without_blocking_other_skills(
+    tmp_path: Path,
+) -> None:
+    repository = make_local_repository(tmp_path)
+    invalid = write_skill(repository / "skills", "alpha-skill")
+    write_skill(repository / "skills", "beta-skill")
+    (invalid / "SKILL.md").write_text("Invalid descriptor")
+    (repository / "skills/draft").mkdir()
+    (repository / "skills/README.md").write_text("Notes")
+
+    assert list_local_skill_names(repository) == ["alpha-skill", "beta-skill"]

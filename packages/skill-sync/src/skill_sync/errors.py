@@ -6,7 +6,7 @@ class SkillSyncError(RuntimeError):
 
 
 class TargetSkillExistsError(SkillSyncError):
-    """Raised when an install target already exists and force is disabled."""
+    """Raised when existing target content prevents installing a personal skill."""
 
 
 class LegacyConfigError(SkillSyncError):

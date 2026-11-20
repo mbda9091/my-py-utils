@@ -11,24 +11,23 @@ if TYPE_CHECKING:
 SKILLS_DIR = "skills"
 
 
-def list_local_skills(repository: Path) -> list[SkillMetadata]:
+def list_local_skill_names(repository: Path) -> list[str]:
     skills_root = repository / SKILLS_DIR
     if skills_root.is_symlink() or (skills_root.exists() and not skills_root.is_dir()):
         msg = f"Personal skills path must be a real directory: {skills_root}"
         raise SkillSyncError(msg)
     if not skills_root.exists():
         return []
-    skills: list[SkillMetadata] = []
-    for path in sorted(skills_root.iterdir()):
-        if path.is_symlink():
-            msg = f"Personal skill must be stored in a real directory: {path}"
-            raise SkillSyncError(msg)
-        if path.is_dir() and ((path / "SKILL.md").exists() or (path / "SKILL.md").is_symlink()):
-            if (path / "SKILL.md").is_symlink():
-                msg = f"Skill descriptor must be a real file: {path / 'SKILL.md'}"
-                raise SkillSyncError(msg)
-            skills.append(validate_local_skill(path))
-    return skills
+    return [
+        path.name
+        for path in sorted(skills_root.iterdir())
+        if path.is_symlink()
+        or (path.is_dir() and ((path / "SKILL.md").exists() or (path / "SKILL.md").is_symlink()))
+    ]
+
+
+def list_local_skills(repository: Path) -> list[SkillMetadata]:
+    return [find_local_skill(repository, name) for name in list_local_skill_names(repository)]
 
 
 def find_local_skill(repository: Path, name: str) -> SkillMetadata:
