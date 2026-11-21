@@ -147,7 +147,6 @@ def test_repeat_install_and_ignore_merge_are_idempotent(
     record = manage.read_record(repository)
     assert record
     assert record["status"] == "ready"
-    assert record["original_local_hooks"] == []
     assert git(repository, "check-ignore", ".security/install-manifest.json").returncode == 0
 
 

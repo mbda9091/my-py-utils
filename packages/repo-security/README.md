@@ -11,7 +11,7 @@ fallback. The standalone shell entry checks Git before starting uv.
 The previous 0.2.0 Linux x64 and native macOS arm64 validation is recorded in
 [the Linux record](../../docs/repo-security-m3-validation.md) and
 [the macOS record](../../docs/repo-security-macos-validation.md).
-Those historical results do not validate this release's native hook migration.
+Those historical results do not validate this release's native hook installation.
 Native Windows and additional architectures remain outside the accepted scope.
 
 From this workspace, initialize with `make dev`, then:
@@ -61,8 +61,8 @@ conflicts, Git settings and potential downloads. It makes no writes, creates no
 locks or environments, executes no target scripts, and performs no downloads.
 Conflicts return 2, including in preview mode. Existing hook managers coexist
 through Git's native scheduler; setup does not wrap or replace their scripts.
-An explicitly disabled pre-commit event, a changed owned command or an ambiguous
-owned migration stops setup with an actionable error and preserves the setting.
+An explicitly disabled pre-commit event or a changed owned command stops setup
+with an actionable error and preserves the setting.
 Other tools' disabled hooks remain disabled. Preview does not run target hooks.
 
 Register additional checks using Git's native `hook.<name>.command` and
@@ -73,34 +73,20 @@ after one fails. No runtime requirement forces other checks to precede security.
 
 Setup recognizes unchanged resources with or without an installation manifest,
 preserves their modification times and unrelated files, and reuses verified
-dependencies. Supported schema-1, version-0.2.0 installations are migrated
-automatically with a one-time migration to schema 2 and native registrations.
-Only verified owned dispatchers and security links are removed. Existing project
-members are preserved and called in their original order, with their original
-arguments and fail-fast behavior, from a fixed-list project script registered as
-an independent native hook. New checks use native registration, not directory
-discovery. The generated fixed-list adapter is machine-local and ignored by Git,
-because its original members remain in the local Git directory.
-Unknown edits are preserved and reported rather than overwritten.
-An owned legacy `core.hooksPath` is removed from its actual local/worktree source
-file. When migration spans both files, setup backs up both, locks both before
-publishing, and activates the native guard before clearing the legacy setting.
-Included, global and ambiguous multi-value settings remain conflicts for review.
-If clearing the owned value would expose the implicit default directory's hooks,
-setup replaces that value with `/dev/null` to keep them inactive; the former
-active project hooks use their new native registrations. A disabled legacy
-dispatcher is removed without enabling its project members.
-Explicit inherited hooksPath settings regain control without being modified.
-The CLI replaces older runtime files only when their bytes still
-match the recorded installation. Existing registered repository rules are kept.
-Unregistered custom files, unsupported versions and corrupt records remain
-conflicts; there is no force or uninstall option.
-**Pre-0.2.0 installations are not automatically upgraded to 0.3.0**: review the diff and
-migrate intentionally, or install into a fresh repository.
+dependencies. It installs and maintains only its own scanner resources and native
+pre-commit registration. It does not inspect other hook directories, remove old
+entry points, rewrite hooksPath, migrate project checks, or create adapters.
+Other hook tools remain responsible for their own installation and configuration.
+Unsupported installation records or conflicting files stop setup before changes;
+there is no automatic cleanup, migration, force or uninstall option.
+If hooksPath selects this tool's own runtime directory, setup reports a conflict
+because native and traditional invocation would execute security twice. It leaves
+the setting untouched for explicit review.
+The CLI updates its own runtime files only when their bytes still match the
+recorded native installation. Existing registered repository rules are retained.
 
 The ignored, machine-local `.security/install-manifest.json` records release and
-installed file hashes, native registration names and scope, migration members,
-original local hooks settings, verified Gitleaks archive
+installed file hashes, the native registration name and scope, verified Gitleaks archive
 and executable digests, and the last installation phase. Missing or damaged tools
 can be repaired by rerunning the same setup. Python tool health checks inspect
 actual launchers, imports and versions, rather than only installed package
@@ -160,22 +146,15 @@ compares against its bundled release defaults, so custom snapshots remain visibl
 as differences. After pulling updated security files, run the same project
 initialization command (`make dev` here). The standalone installer renews local
 registration only for files matching both Git HEAD and the index, or the approved
-targets of an interrupted migration. Uncommitted working or staged edits stop
-setup. It recognizes exact shipped older dispatchers and removes only the
-registered, unchanged built-in legacy pre-push hook. Other checks are preserved.
-
-Before changing a managed installation, setup automatically saves its old record,
-affected files, owned entry point and original local hook settings under
-`.git/repo-security-backups/upgrade-*/`. This location is private and never part of
-a commit. Interrupted migrations retain their original backup and can be retried
-with the same command; persistent errors keep commits blocked. A shell guard
-checks the setup lock before invoking Python, including during runtime updates.
-No full filesystem or dependency rollback is promised. Unknown or modified hooks
-are never silently replaced. Standalone setup without
-`--install-hooks` is an advanced tools-only Python entry point that verifies tools and
-leaves Git settings unchanged (used by CI); migrating an older installation
-requires the normal hook-enabled entry point. Do not commit the installation manifest,
-virtual environment or binaries.
+targets of an interrupted native resource update. Uncommitted working or staged
+edits stop setup. No hook entry points or project checks are cleaned up or migrated.
+A shell guard checks the setup lock before invoking Python, including during
+runtime updates. Failed updates retain incomplete state and can be retried with
+the same bundled setup command. No full filesystem or dependency rollback is
+promised. Standalone setup without `--install-hooks` is an advanced tools-only
+Python entry point that verifies tools and leaves Git settings unchanged (used by CI);
+updates to an existing managed native installation require the normal hook-enabled
+entry point. Do not commit the installation manifest, virtual environment or binaries.
 
 `scan` defaults to `staged`; `head` scans HEAD, and `history` scans locally
 reachable commits without fetching. Shallow repositories show an explicit coverage

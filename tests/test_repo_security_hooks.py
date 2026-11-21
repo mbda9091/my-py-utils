@@ -9,7 +9,6 @@ from repo_security.templates import hook_config, manage
 from tests import test_repo_security as fixtures
 from tests import test_repo_security_install as install_fixtures
 from tests.test_repo_security import git
-from tests.test_repo_security_native import write_legacy
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -119,7 +118,9 @@ def test_repeat_setup_preserves_independent_hooks(
     assert fake_install == [repository, repository]
 
 
-@pytest.mark.parametrize("relative", [manage.HOOK_ENTRY, manage.HOOK_LINK])
+@pytest.mark.parametrize(
+    "relative", [".git/hooks/pre-commit", ".git/hooks/pre-commit.d/10-security"]
+)
 @pytest.mark.parametrize("kind", ["file", "link", "broken-link", "directory"])
 def test_setup_preserves_other_tools_hook_entries(
     repository: Path, relative: str, kind: str, fake_install: list[Path]
@@ -145,47 +146,6 @@ def test_setup_preserves_other_tools_hook_entries(
     assert outside.read_text().endswith("exit 0\n")
     assert fake_install == [repository]
     assert (repository / ".security").exists()
-
-
-def test_setup_migrates_only_legacy_local_hooks_path(
-    repository: Path, fake_install: list[Path]
-) -> None:
-    write_legacy(repository)
-    git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
-    setup_repository(repository)
-    state = manage.hooks_state(repository)
-    assert state.effective is None
-    assert not state.local
-    assert manage.hooks_enabled(repository, state)
-    assert not (repository / manage.HOOK_LINK).is_symlink()
-    assert not (repository / manage.HOOK_ENTRY).exists()
-    record = manage.read_record(repository)
-    assert record
-    assert record["original_local_hooks"] == []
-    assert "migration_backup" in record
-    assert (
-        '".security/hooks"' in (repository / record["migration_backup"] / "backup.json").read_text()
-    )
-    assert fake_install == [repository]
-
-
-def test_migration_does_not_shadow_inherited_hook_manager(
-    repository: Path, fake_install: list[Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config = repository / "global.gitconfig"
-    config.write_text("[core]\n\thooksPath = .external-hooks\n")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
-    write_legacy(repository)
-    git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
-    setup_repository(repository)
-    assert (
-        git(repository, "config", "--local", "--get", "core.hooksPath", check=False).returncode == 1
-    )
-    assert (
-        git(repository, "config", "--global", "--get", "core.hooksPath").stdout.strip()
-        == ".external-hooks"
-    )
-    assert fake_install == [repository]
 
 
 def register_project(root: Path, command: str) -> None:

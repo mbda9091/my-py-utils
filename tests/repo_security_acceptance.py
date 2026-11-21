@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-NATIVE_SCHEMA = 2
 
 
 @dataclass(frozen=True)
@@ -213,114 +212,6 @@ def check_hooks(cli: Path, root: Path, remote: Path) -> None:
     )
 
 
-def check_managed_upgrade(  # noqa: PLR0915 -- exercise genuine old resources and both upgrade entries
-    cli: Path, root: Path, mode: str
-) -> dict[str, str]:
-    golden = Path(__file__).parent / "fixtures/repo-security"
-    record_path = root / ".security/install-manifest.json"
-    record = json.loads(record_path.read_bytes())
-    reviewed = {
-        relative: ((root / relative).read_bytes(), (root / relative).stat().st_mode)
-        for relative in record["files"]
-    }
-    for registration in record.pop("native_hooks"):
-        git(root, "config", "--remove-section", "hook." + registration["name"])
-    record.pop("hook_scope")
-    record.pop("migration_members")
-    record.update(schema_version=1, template_version="0.2.0")
-    for relative, source in (
-        ("manage.py", "manage.py.txt"),
-        ("setup.sh", "setup.sh.template"),
-        ("setup.py", "setup.py.template"),
-        ("hooks/pre-commit", "hooks/pre-commit.template"),
-    ):
-        content = (golden / "v0.2.0" / source).read_bytes()
-        (root / ".security" / relative).write_bytes(content)
-        digest = hashlib.sha256(content).hexdigest()
-        record["files"][".security/" + relative].update(
-            template_sha256=digest, installed_sha256=digest
-        )
-    (root / ".security/hook_config.py").unlink()
-    record["files"].pop(".security/hook_config.py")
-    policy = root / ".security/policy.json"
-    policy.write_bytes(policy.read_bytes() + b"\n")
-    preserved_policy = policy.read_bytes()
-    record["files"][".security/policy.json"]["installed_sha256"] = hashlib.sha256(
-        preserved_policy
-    ).hexdigest()
-    push_content = (golden / "legacy-pre-push.sh").read_bytes()
-    push_digest = hashlib.sha256(push_content).hexdigest()
-    record["files"][".security/hooks/pre-push"] = {
-        "template_sha256": push_digest,
-        "installed_sha256": push_digest,
-        "executable": True,
-    }
-    old_push = root / ".security/hooks/pre-push"
-    old_push.write_bytes(push_content)
-    old_push.chmod(0o755)
-    entry = root / ".git/hooks/pre-commit"
-    entry.write_bytes((golden / "dispatcher-late.sh").read_bytes())
-    entry.chmod(0o755)
-    member = root / ".git/hooks/pre-commit.d/10-security"
-    member.parent.mkdir()
-    member.symlink_to("../../../.security/hooks/pre-commit")
-    extra = member.parent / "20-project-checks"
-    extra.write_text("#!/bin/sh\necho migrated-project-hook-ran >&2\n")
-    extra.chmod(0o755)
-    preserved_extra = extra.read_bytes(), extra.stat().st_mtime_ns
-    if mode == "single":
-        (root / ".security/setup.sh").unlink()
-        record["files"].pop(".security/setup.sh")
-        record_path.write_text(json.dumps(record), encoding="utf-8")
-        old_record = record_path.read_bytes()
-        run([cli, "setup", root], cwd=root, offline=True)
-        case = "bundled-native-migration-of-0.2.0"
-    else:
-        record_path.write_text(json.dumps(record), encoding="utf-8")
-        old_record = record_path.read_bytes()
-        for relative, (content, permissions) in reviewed.items():
-            if relative not in {
-                ".security/policy.json",
-                ".security/semgrep.yml",
-                ".security/gitleaks.toml",
-            }:
-                (root / relative).write_bytes(content)
-                (root / relative).chmod(permissions)
-        old_push.unlink()
-        (root / "Makefile").write_bytes(
-            (Path(__file__).resolve().parents[1] / "Makefile").read_bytes()
-        )
-        (root / "pyproject.toml").write_text(
-            '[project]\nname = "security-upgrade-acceptance"\nversion = "0.0.0"\n'
-            'requires-python = ">=3.11"\n[tool.uv]\npackage = false\n'
-            "[tool.uv.workspace]\nmembers = []\n",
-            encoding="utf-8",
-        )
-        with (root / ".gitignore").open("a") as stream:
-            stream.write("\n.venv/\n")
-        git(root, "config", "user.name", "Security Acceptance")
-        git(root, "config", "user.email", "test@example.com")
-        git(root, "add", ".")
-        git(root, "commit", "--no-verify", "-qm", "Pulled managed update fixture")
-        git(root, "config", "core.hooksPath", ".security/hooks")
-        run(["make", "dev"], cwd=root, offline=True)
-        case = "standalone-native-migration-after-reviewed-pull"
-    updated = json.loads(record_path.read_bytes())
-    backup = root / updated["migration_backup"]
-    assert updated["schema_version"] == NATIVE_SCHEMA
-    assert updated["status"] == updated["phase"] == "ready"
-    assert (backup / "files/.security/install-manifest.json").read_bytes() == old_record
-    assert policy.read_bytes() == preserved_policy
-    assert preserved_extra == (extra.read_bytes(), extra.stat().st_mtime_ns)
-    assert not entry.exists()
-    assert not member.is_symlink()
-    assert not old_push.exists()
-    assert (root / ".security/setup.sh").is_file()
-    assert run(["git", "config", "--get", "core.hooksPath"], cwd=root, expected=1).stdout == ""
-    log(f"PASS {mode}: native migration ({case}), backup and independent checks preserved")
-    return {"case": case, "backup": updated["migration_backup"]}
-
-
 def check_python_repair(cli: Path, root: Path, mode: str) -> str:
     python = root / ".security/.venv/bin/python"
     if mode == "single":
@@ -405,7 +296,6 @@ def exercise_mode(  # noqa: PLR0915 -- ordered installation and hook integration
     extra.chmod(0o755)
     git(root, "config", "hook.project-checks.command", "./.project-hooks/project-checks")
     git(root, "config", "hook.project-checks.event", "pre-commit")
-    result["managed_upgrade"] = check_managed_upgrade(cli, root, mode)
     result["python_runtime_repair"] = check_python_repair(cli, root, mode)
     before = configuration_snapshot(root)
     run([cli, "setup", root], cwd=work, offline=True)

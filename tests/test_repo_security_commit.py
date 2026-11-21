@@ -95,8 +95,6 @@ def test_unready_installation_blocks_real_commit(  # noqa: C901, PLR0912, PLR091
         elif damage == "nonexecutable_gitleaks":
             binary.write_bytes(content)
             binary.chmod(0o644)
-    elif damage == "legacy_push":
-        (security / "hooks/pre-push").write_text("#!/bin/sh\nexit 0\n")
     result = git(root, "commit", "-qm", "Must be blocked", check=False)
     assert result.returncode != 0
     assert git(root, "rev-parse", "HEAD").stdout.strip() == before
