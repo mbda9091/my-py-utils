@@ -63,10 +63,29 @@ until the link and installation record are ready. Detected edits or failures
 restore the original; a failed restoration retains its backup and reports where
 it can be recovered. Preparing a copy also supports moves across filesystems.
 
-A same-name skill already in the repository is a conflict; neither side is
-overwritten or merged. Repeating `add` on a managed real directory or a link to
-that skill succeeds without another move. Links to other locations, symlinked
-SKILL.md files, nested Git metadata and unsupported special files are rejected.
+A same-name skill already in the repository is a conflict by default. To replace
+it explicitly, use:
+
+```bash
+skill-sync add ~/.agents/skills/foo --force
+```
+
+`add --force` replaces the entire stored skill with the selected directory,
+including removing files that exist only in the old version. Existing links to
+that repository path read the replacement automatically. The source path becomes
+a link to the replacement, and its installation record is added without dropping
+other use paths. The previous repository entry is held in a temporary backup
+until copying, linking and recording finish. Failure before completion restores
+the source, the old repository entry and previous records; failed recovery reports
+the retained backup. After the replacement, source link and records have committed,
+failure to clean the old temporary backup produces a warning with its full path.
+The add still succeeds, and any remaining files stay there for manual cleanup.
+This operation does not stage or commit Git changes.
+
+Repeating `add` on a managed real directory or a link to that skill succeeds
+without another move, with or without `--force`. Links to other locations,
+symlinked repository skills or SKILL.md files, nested Git metadata and unsupported
+special files remain rejected.
 All local files are preserved, including caches and existing legacy metadata;
 `add` never generates or refreshes `skill-sync.json`.
 

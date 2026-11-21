@@ -45,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Move a local skill into the personal repository and link it back.",
     )
     add_parser.add_argument("local_skill_dir", type=Path)
+    add_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing same-name personal repository skill.",
+    )
 
     install_parser = subparsers.add_parser(
         "install",
@@ -91,7 +96,7 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         output.write(f"path: {metadata.path}\n")
     elif command == "add":
         with mutation_lock(get_state_home()):
-            _run_add(args.local_skill_dir, output)
+            _run_add(args.local_skill_dir, output, error_output, force=args.force)
     elif command == "install":
         with mutation_lock(get_state_home()):
             return _run_install(args, output, error_output)
@@ -101,13 +106,18 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
     return 0
 
 
-def _run_add(path: Path, output: TextIO) -> None:
+def _run_add(path: Path, output: TextIO, error_output: TextIO, *, force: bool) -> None:
     output.write("Keep this skill unchanged until the add operation finishes.\n")
-    result = add_skill(path, read_repository_config())
+    result = add_skill(path, read_repository_config(), force=force)
     action = "Added skill" if result.changed else "Skill already managed"
     output.write(f"{action}: {result.name}\n")
     output.write(f"path: {result.path}\n")
     output.write(f"repository path: {result.repository_path}\n")
+    if result.cleanup_path is not None:
+        error_output.write(
+            "[WARN] Skill added successfully, but the old repository backup could not be "
+            f"fully removed. Inspect remaining files at: {result.cleanup_path}\n"
+        )
 
 
 def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO) -> int:
