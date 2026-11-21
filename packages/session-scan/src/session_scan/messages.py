@@ -22,6 +22,10 @@ CONTEXT_SOURCES = {
     "runtime-context",
     "time-context",
     "tool-jobs",
+    "schedule",
+    "user-approval",
+    "fworkflow",
+    "fcodex-subagent-input-notice",
 }
 
 if TYPE_CHECKING:

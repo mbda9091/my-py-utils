@@ -76,6 +76,8 @@ Message adapters:
   replacements and packed streaming deltas do not themselves count as dialogue.
   Source-attributed `runtime-context`, `time-context` and `tool-jobs` user-role
   records are context injections, not human messages.
+  Scheduled deliveries, approval-policy notices, workflow context and Codex
+  subagent placeholder notices are also excluded by their explicit source kinds.
   Message events use millisecond `time`. Model `replayState` is provider state,
   not an inherited-history flag, and does not suppress a model's live message.
 - Legacy `seedLength` excludes inherited sequence numbers. `isSeeded` without a

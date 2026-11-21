@@ -452,7 +452,18 @@ def test_selected_summary_counts_are_consistent(tmp_path: Path) -> None:
     assert stats["error_count"] == 0
 
 
-@pytest.mark.parametrize("source_kind", ["runtime-context", "time-context", "tool-jobs"])
+@pytest.mark.parametrize(
+    "source_kind",
+    [
+        "runtime-context",
+        "time-context",
+        "tool-jobs",
+        "schedule",
+        "user-approval",
+        "fworkflow",
+        "fcodex-subagent-input-notice",
+    ],
+)
 def test_dsh_attributed_context_does_not_count_as_dialogue(
     tmp_path: Path, source_kind: str
 ) -> None:
