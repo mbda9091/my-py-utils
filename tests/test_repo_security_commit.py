@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from importlib.metadata import PackageNotFoundError
 from typing import TYPE_CHECKING
 
@@ -36,7 +37,6 @@ real_scanners = fixtures.real_scanners
         "missing_gitleaks",
         "changed_gitleaks",
         "nonexecutable_gitleaks",
-        "legacy_push",
     ],
 )
 def test_unready_installation_blocks_real_commit(  # noqa: C901, PLR0912, PLR0915 -- explicit failure matrix
@@ -49,7 +49,7 @@ def test_unready_installation_blocks_real_commit(  # noqa: C901, PLR0912, PLR091
     sample.write_text("print('baseline')\n")
     git(root, "add", "sample.py")
     # Establish HEAD in this disposable fixture before damaging its installation.
-    git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "Fixture baseline")
+    git(root, "commit", "--no-verify", "-qm", "Fixture baseline")
     before = git(root, "rev-parse", "HEAD").stdout.strip()
     sample.write_text("print('safe change')\n")
     git(root, "add", "sample.py")
@@ -95,8 +95,6 @@ def test_unready_installation_blocks_real_commit(  # noqa: C901, PLR0912, PLR091
         elif damage == "nonexecutable_gitleaks":
             binary.write_bytes(content)
             binary.chmod(0o644)
-    elif damage == "legacy_push":
-        (security / "hooks/pre-push").write_text("#!/bin/sh\nexit 0\n")
     result = git(root, "commit", "-qm", "Must be blocked", check=False)
     assert result.returncode != 0
     assert git(root, "rev-parse", "HEAD").stdout.strip() == before
@@ -125,18 +123,97 @@ def test_ready_guard_requires_security_member(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(manage, "version", manage.SCANNER_VERSIONS.__getitem__)
-    (real_scanners / manage.HOOK_LINK).unlink()
+    git(real_scanners, "config", "--unset-all", "hook.repo-security.event")
     with pytest.raises(RepoSecurityError, match="hooks are not enabled"):
         manage.require_commit_ready(real_scanners)
-    assert not (real_scanners / manage.HOOK_LINK).exists()
+    assert (
+        git(
+            real_scanners, "config", "--get-all", "hook.repo-security.event", check=False
+        ).returncode
+        == 1
+    )
 
 
-def test_setup_refuses_to_silently_keep_legacy_push_hook(
+def test_partial_commit_scans_its_own_index(real_scanners: Path) -> None:
+    root = real_scanners
+    first, second = root / "first.py", root / "second.py"
+    first.write_text("print('original')\n")
+    second.write_text("print('original')\n")
+    git(root, "add", "first.py", "second.py")
+    git(root, "commit", "--no-verify", "-qm", "Fixture baseline")
+    first.write_text("result = eval(user_input)\n")
+    git(root, "add", "first.py")
+    second.write_text("print('safe partial commit')\n")
+    clean = git(
+        root, "commit", "--only", "-qm", "Safe partial commit", "--", "second.py", check=False
+    )
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert git(root, "show", "HEAD:first.py").stdout == "print('original')\n"
+    before = git(root, "rev-parse", "HEAD").stdout
+    blocked = git(
+        root, "commit", "--only", "-qm", "Unsafe partial commit", "--", "first.py", check=False
+    )
+    assert blocked.returncode != 0
+    assert "Semgrep:" in blocked.stdout + blocked.stderr
+    assert git(root, "rev-parse", "HEAD").stdout == before
+
+
+def test_unrelated_pre_push_script_is_preserved(
     repository: Path,
 ) -> None:
     path = repository / ".security/hooks/pre-push"
     path.parent.mkdir(parents=True)
     path.write_text("#!/bin/sh\nexit 0\n")
     plan = manage.make_plan(repository, template_files())
-    assert any("Legacy pre-push hook" in conflict for conflict in plan.conflicts)
+    assert not plan.conflicts
     assert path.read_text() == "#!/bin/sh\nexit 0\n"
+
+
+def test_linked_worktree_hook_uses_its_own_root_and_commit_index(real_scanners: Path) -> None:
+    root = real_scanners
+    (root / "sample.py").write_text("print('baseline')\n")
+    git(root, "add", "sample.py")
+    git(root, "commit", "--no-verify", "-qm", "Main baseline")
+    git(root, "config", "extensions.worktreeConfig", "true")
+    git(root, "config", "--local", "--remove-section", "hook.repo-security")
+    git(root, "config", "--worktree", "hook.repo-security.command", "./.security/hooks/pre-commit")
+    git(root, "config", "--worktree", "hook.repo-security.event", "pre-commit")
+    worktree = root.parent / "linked real scanner checkout"
+    git(root, "worktree", "add", "--detach", str(worktree))
+    resources = template_files()
+    for resource in resources:
+        path = worktree / resource.destination
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(resource.content)
+        path.chmod(0o755 if resource.executable else 0o644)
+    security = worktree / ".security"
+    (security / ".venv").symlink_to(root / ".security/.venv", target_is_directory=True)
+    (security / "bin").mkdir()
+    os.link(root / ".security/bin/gitleaks", security / "bin/gitleaks")
+    plan = manage.make_plan(worktree, resources)
+    record = manage.record_for(plan)
+    original_record = manage.read_record(root)
+    assert original_record
+    record["gitleaks"] = original_record["gitleaks"]
+    record["status"] = record["phase"] = "ready"
+    manage.save_record(worktree, record)
+    manage.hook_config.activate_hooks(worktree, plan.native)
+    main_config = (root / ".git/config.worktree").read_bytes()
+    main_head = git(root, "rev-parse", "HEAD").stdout
+    ready = git(worktree, "hook", "run", "pre-commit", check=False)
+    assert ready.returncode == 0, ready.stdout + ready.stderr
+    assert (ready.stdout + ready.stderr).count("Checking staged snapshot") == 1
+    (worktree / "sample.py").write_text("print('safe partial commit')\n")
+    clean = git(worktree, "commit", "--only", "-qm", "Safe linked commit", "--", "sample.py")
+    assert (clean.stdout + clean.stderr).count("Checking staged snapshot") == 1
+    before = git(worktree, "rev-parse", "HEAD").stdout
+    (worktree / "sample.py").write_text("result = eval(user_input)\n")
+    blocked = git(
+        worktree, "commit", "--only", "-qm", "Unsafe linked commit", "--", "sample.py",
+        check=False,
+    )
+    assert blocked.returncode != 0
+    assert "Semgrep:" in blocked.stdout + blocked.stderr
+    assert git(worktree, "rev-parse", "HEAD").stdout == before
+    assert git(root, "rev-parse", "HEAD").stdout == main_head
+    assert (root / ".git/config.worktree").read_bytes() == main_config

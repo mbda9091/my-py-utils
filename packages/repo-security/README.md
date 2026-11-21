@@ -2,13 +2,17 @@
 
 Install repository-local Gitleaks, Semgrep and Presidio scanners with uv.
 The CLI provides setup, read-only planning, repeat installation, recovery,
-diagnostics, manual scanning and optional GitHub Actions. This release is
-validated on **Linux x64** (Ubuntu 22.04.5 userland, glibc 2.35, WSL2 Linux
-kernel in the acceptance environment). Native **macOS arm64** acceptance,
-including the exact host and Python combinations, is recorded in
-[the macOS validation record](../../docs/repo-security-macos-validation.md).
-Intel macOS, Linux arm64 and native Windows have not been accepted for this release.
-Retained download checksums for other platforms are not evidence of support.
+diagnostics, manual scanning and optional GitHub Actions.
+**Git 2.54.0 or newer is required.** Setup rejects older, missing or unrecognized
+Git versions before changing the target repository, acquiring its setup lock,
+creating environments or downloading tools. There is no legacy hook backend or
+fallback. The standalone shell entry checks Git before starting uv.
+
+The previous 0.2.0 Linux x64 and native macOS arm64 validation is recorded in
+[the Linux record](../../docs/repo-security-m3-validation.md) and
+[the macOS record](../../docs/repo-security-macos-validation.md).
+Those historical results do not validate this release's native hook installation.
+Native Windows and additional architectures remain outside the accepted scope.
 
 From this workspace, initialize with `make dev`, then:
 
@@ -24,11 +28,27 @@ uv run --package repo-security repo-security scan /path/to/repo --mode history
 Setup accepts a repository root or a directory inside it. It writes `.security/`,
 merges only necessary `.gitignore` entries, installs locked scanners in a separate
 uv-managed Python 3.13 environment, and enables only the repository-local
-pre-commit hook through a dispatcher in Git's default `.git/hooks/` directory.
-The dispatcher runs independent executable checks in `.git/hooks/pre-commit.d/`
-in filename order, then runs the mandatory security check once, last, so files
-staged by earlier checks are included. `10-security` is the reserved security
-member and a relative symlink to `.security/hooks/pre-commit`.
+pre-commit hook with Git-native configuration:
+
+```gitconfig
+[hook "repo-security"]
+    command = ./.security/hooks/pre-commit
+    event = pre-commit
+```
+
+Existing named hooks, traditional hook files, permissions and `core.hooksPath`
+remain intact. If another tool already uses the name, setup chooses a stable
+unused name and records it locally. No traditional dispatcher or `10-security`
+link is created. Only this tool's registration is moved to the end of the managed
+local/worktree config on setup; other hooks retain their relative order.
+Repeating setup keeps one registration and avoids writes when it is already current.
+Git runs traditional hooks after configured hooks. Later registrations, includes
+and command-scope settings may also run after security; setup does not reorder
+those sources or require security to be the absolute final hook at runtime.
+The scan covers the index when security is invoked, including earlier hooks'
+staged changes, but cannot cover later hooks' changes. Scanning preserves Git's
+commit-specific index, including `git commit --only`.
+
 After deploying reviewed files, setup enables the hook before
 installing tools; the hook blocks commits while setup is incomplete or locked.
 Only successful real synthetic sample checks mark the installation ready.
@@ -39,33 +59,34 @@ remote settings are not changed; setup does not fetch or scan history.
 `--dry-run` reports additions, unchanged files, executable repairs, all detected
 conflicts, Git settings and potential downloads. It makes no writes, creates no
 locks or environments, executes no target scripts, and performs no downloads.
-Conflicts return 2, including in preview mode. Existing hook managers are not
-rewritten or chained automatically; the error identifies the conflict for manual
-integration. Setup accepts its own dispatcher and security member, preserves other
-hook files, and refuses an unrelated existing pre-commit entry or security member.
-It removes only the previous local `.security/hooks` setting when migrating to
-Git's default directory; global Git settings remain unchanged.
+Conflicts return 2, including in preview mode. Existing hook managers coexist
+through Git's native scheduler; setup does not wrap or replace their scripts.
+An explicitly disabled pre-commit event or a changed owned command stops setup
+with an actionable error and preserves the setting.
+Other tools' disabled hooks remain disabled. Preview does not run target hooks.
 
-Add future independent pre-commit checks as executable files such as
-`.git/hooks/pre-commit.d/20-project-checks`; this requires no changes to `.security/`.
-Any failed check aborts the commit. A missing or non-executable security member
-also aborts the commit. Keep only executable checks in this directory: dangling
-links, directories and non-executable files are errors. Other hook types, such as
-`commit-msg`, remain separate files in `.git/hooks/`. A tool that overwrites
-`.git/hooks/pre-commit` replaces the dispatcher and needs explicit integration.
+Register additional checks using Git's native `hook.<name>.command` and
+`hook.<name>.event` configuration. Rerun setup to move this tool's own registration
+after newly added registrations in the managed config. Any check failure blocks
+the commit according to Git's scheduling rules; Git may still run other checks
+after one fails. No runtime requirement forces other checks to precede security.
 
 Setup recognizes unchanged resources with or without an installation manifest,
 preserves their modification times and unrelated files, and reuses verified
-dependencies. Supported schema-1, version-0.2.0 installations are migrated
-automatically. The CLI replaces older runtime files only when their bytes still
-match the recorded installation. Existing registered repository rules are kept.
-Unregistered custom files, unsupported versions and corrupt records remain
-conflicts; there is no force or uninstall option.
-**M1 installations are not automatically upgraded to 0.2.0**: review the diff and
-migrate intentionally, or install into a fresh repository.
+dependencies. It installs and maintains only its own scanner resources and native
+pre-commit registration. It does not inspect other hook directories, remove old
+entry points, rewrite hooksPath, migrate project checks, or create adapters.
+Other hook tools remain responsible for their own installation and configuration.
+Unsupported installation records or conflicting files stop setup before changes;
+there is no automatic cleanup, migration, force or uninstall option.
+If hooksPath selects this tool's own runtime directory, setup reports a conflict
+because native and traditional invocation would execute security twice. It leaves
+the setting untouched for explicit review.
+The CLI updates its own runtime files only when their bytes still match the
+recorded native installation. Existing registered repository rules are retained.
 
 The ignored, machine-local `.security/install-manifest.json` records release and
-installed file hashes, original local hooks settings, verified Gitleaks archive
+installed file hashes, the native registration name and scope, verified Gitleaks archive
 and executable digests, and the last installation phase. Missing or damaged tools
 can be repaired by rerunning the same setup. Python tool health checks inspect
 actual launchers, imports and versions, rather than only installed package
@@ -77,10 +98,11 @@ enabled, a failed first installation or repair keeps it active and leaves the
 installation incomplete, so ordinary commits are blocked until setup succeeds.
 Concurrent external hook changes are preserved. No full filesystem or cache
 rollback is promised. If a killed process leaves `.git/repo-security-setup.lock`,
-confirm no setup is running before removing that lock manually.
+confirm no setup is running before removing that lock manually. For linked
+worktrees, resolve the private Git directory with `git rev-parse --absolute-git-dir`.
 
 `doctor` reports incomplete state, missing or customized files, permissions,
-hooks, Gitleaks provenance, real tool versions, rule validity and synthetic
+native hook configuration and enablement, Gitleaks provenance, real tool versions, rule validity and synthetic
 sample detection. It does not install or repair anything, and skips untrusted
 modified runtime scripts/binaries. Checks use private temporary samples, not
 business code; Python bytecode writes are disabled. Custom rule differences are
@@ -124,22 +146,15 @@ compares against its bundled release defaults, so custom snapshots remain visibl
 as differences. After pulling updated security files, run the same project
 initialization command (`make dev` here). The standalone installer renews local
 registration only for files matching both Git HEAD and the index, or the approved
-targets of an interrupted migration. Uncommitted working or staged edits stop
-setup. It recognizes exact shipped older dispatchers and removes only the
-registered, unchanged built-in legacy pre-push hook. Other checks are preserved.
-
-Before changing a managed installation, setup automatically saves its old record,
-affected files, owned entry point and original local hook settings under
-`.git/repo-security-backups/upgrade-*/`. This location is private and never part of
-a commit. Interrupted migrations retain their original backup and can be retried
-with the same command; persistent errors keep commits blocked. A shell guard
-checks the setup lock before invoking Python, including during runtime updates.
-No full filesystem or dependency rollback is promised. Unknown or modified hooks
-are never silently replaced. Standalone setup without
-`--install-hooks` is an advanced tools-only Python entry point that verifies tools and
-leaves Git settings unchanged (used by CI); migrating an older installation
-requires the normal hook-enabled entry point. Do not commit the installation manifest,
-virtual environment or binaries.
+targets of an interrupted native resource update. Uncommitted working or staged
+edits stop setup. No hook entry points or project checks are cleaned up or migrated.
+A shell guard checks the setup lock before invoking Python, including during
+runtime updates. Failed updates retain incomplete state and can be retried with
+the same bundled setup command. No full filesystem or dependency rollback is
+promised. Standalone setup without `--install-hooks` is an advanced tools-only
+Python entry point that verifies tools and leaves Git settings unchanged (used by CI);
+updates to an existing managed native installation require the normal hook-enabled
+entry point. Do not commit the installation manifest, virtual environment or binaries.
 
 `scan` defaults to `staged`; `head` scans HEAD, and `history` scans locally
 reachable commits without fetching. Shallow repositories show an explicit coverage
@@ -150,7 +165,7 @@ No automatic pre-push hook is installed, so pushing does not rescan commits.
 Use manual history scanning when required. Full history checks can be expensive.
 
 The pre-commit entry point uses `staged --require-ready`. Before scanning it
-checks the ready installation record, setup lock, default hook dispatcher and security member,
+checks the ready installation record, setup lock, unique enabled native registrations,
 registered file digests and permissions, Gitleaks provenance, scanner entry
 points and pinned Python package versions. Missing tools/configuration,
 incomplete setup, modified managed files or scanner errors reject the commit.
@@ -159,8 +174,8 @@ it does not run doctor's synthetic scans on every commit. Reviewed changes to
 managed runtime or policy files require renewing the local registration.
 
 The guarantee requires Git to invoke the installed hook. A new clone that has
-never enabled hooks, a missing/non-executable pre-commit entry point, a changed
-`core.hooksPath`, or explicit `git commit --no-verify` cannot be intercepted by
+never enabled hooks, a deleted/disabled native registration, a missing/non-executable
+security entry point, an unsupported Git version, or explicit `git commit --no-verify` cannot be intercepted by
 repository hook code. Initialize each clone with setup; there is no claim that an
 uninitialized clone blocks its first commit. This follows
 [Git's hook invocation rules](https://git-scm.com/docs/githooks).
@@ -170,8 +185,16 @@ Rules remain limited starter Python/JS/TS patterns and offline PII recognizers,
 without NLP model downloads or cloud rules. Binary/unsupported text encodings
 produce PII coverage warnings; submodules and files over 5 MiB block. External
 scanners time out after 60 seconds per snapshot. Review precise rule exceptions
-yourself; setup does not add allowlists automatically. Bare repositories, linked
-worktrees and submodule checkouts are unsupported. Native Windows is unsupported;
+yourself; setup does not add allowlists automatically. Bare repositories and
+submodule checkouts are unsupported. Linked worktrees require an already enabled
+`extensions.worktreeConfig` and use their own `config.worktree`, setup lock,
+installation record and scanner environment. Setup does not enable the shared
+extension or delete hooks owned by the main checkout. An active shared old security
+entry must first be migrated in its owning checkout. If the checkout already has
+an independent `core.hooksPath`, setup leaves the inactive shared entry untouched
+and configures only this worktree. Preparing that isolation is an explicit
+workspace operation; setup does not change hooksPath to hide existing checks.
+Native Windows is unsupported;
 The observed WSL2 Linux environment does not establish native Windows or
 Windows-mounted filesystem support.
 

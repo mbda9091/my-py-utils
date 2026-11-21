@@ -22,6 +22,9 @@ INJECTED_EXIT = 37
 def shell_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     directory = tmp_path / "shell commands"
     directory.mkdir()
+    git_binary = shutil.which("git")
+    assert git_binary
+    (directory / "git").symlink_to(git_binary)
     dirname = shutil.which("dirname")
     assert dirname
     (directory / "dirname").symlink_to(dirname)

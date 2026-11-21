@@ -128,7 +128,7 @@ def test_conflicts_are_aggregated_in_read_only_plan(
     output = capsys.readouterr().out
     assert "semgrep.yml" in output
     assert "policy.json" in output
-    assert "existing hook manager" in output
+    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == ".husky"
     assert snapshot(repository) == before
     assert not fake_install
 
@@ -147,7 +147,6 @@ def test_repeat_install_and_ignore_merge_are_idempotent(
     record = manage.read_record(repository)
     assert record
     assert record["status"] == "ready"
-    assert record["original_local_hooks"] == []
     assert git(repository, "check-ignore", ".security/install-manifest.json").returncode == 0
 
 
@@ -249,31 +248,23 @@ def test_external_hook_change_during_install_is_preserved(
     assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == ".external-hooks"
 
 
-def test_activation_failure_restores_original_local_setting(
+def test_activation_failure_keeps_incomplete_and_preserves_other_configuration(
     repository: Path,
     fake_install: list[Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    git(repository, "config", "core.hooksPath", manage.HOOKS_PATH)
-    original = manage.hooks_state
-    calls = 0
+    git(repository, "config", "core.hooksPath", ".external")
 
-    def state(root: Path) -> manage.HooksState:
-        nonlocal calls
-        calls += 1
-        actual = original(root)
-        # Fail only the post-write effective-value check, while local config remains ours.
-        if not actual.local and calls > 1:
-            return manage.HooksState(actual.local, ".blocked-by-command-config", "command line:")
-        return actual
+    def disabled(_root: Path, _plan: manage.hook_config.HookPlan) -> bool:
+        return False
 
-    monkeypatch.setattr(manage, "hooks_state", state)
+    monkeypatch.setattr(manage.hook_config, "hooks_enabled", disabled)
     with pytest.raises(RepoSecurityError, match="did not take effect"):
         setup_repository(repository)
-    assert (
-        git(repository, "config", "--local", "--get", "core.hooksPath").stdout.strip()
-        == manage.HOOKS_PATH
-    )
+    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == ".external"
+    record = manage.read_record(repository)
+    assert record
+    assert record["status"] == "incomplete"
     assert not fake_install
 
 
@@ -450,24 +441,16 @@ def test_final_manifest_failure_keeps_commit_protection_active(
     assert fake_install == [repository]
 
 
-def test_post_activation_concurrent_hook_value_is_not_rolled_back(
+def test_git_config_lock_preserves_external_writer(
     repository: Path,
     fake_install: list[Path],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original = manage.hooks_state
-
-    def state(root: Path) -> manage.HooksState:
-        actual = original(root)
-        if (root / manage.HOOK_ENTRY).is_file() and actual.effective is None:
-            git(root, "config", "core.hooksPath", ".concurrent")
-            return original(root)
-        return actual
-
-    monkeypatch.setattr(manage, "hooks_state", state)
-    with pytest.raises(RepoSecurityError, match="changed during setup"):
+    lock = repository / ".git/config.lock"
+    lock.write_text("external writer\n")
+    with pytest.raises(RepoSecurityError, match="locked by another writer"):
         setup_repository(repository)
-    assert git(repository, "config", "--get", "core.hooksPath").stdout.strip() == ".concurrent"
+    assert lock.read_text() == "external writer\n"
+    assert not git(repository, "config", "--get", "hook.repo-security.command", check=False).stdout
     assert not fake_install
 
 
@@ -476,10 +459,10 @@ def test_hook_removal_during_install_is_not_marked_ready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def remove_hooks(root: Path, _record: manage.InstallRecord) -> None:
-        (root / manage.HOOK_LINK).unlink()
+        git(root, "config", "--unset-all", "hook.repo-security.event")
 
     monkeypatch.setattr(manage, "install_runtime", remove_hooks)
-    with pytest.raises(RepoSecurityError, match="hooks changed during installation"):
+    with pytest.raises(RepoSecurityError, match="changed during verification"):
         setup_repository(repository)
     record = manage.read_record(repository)
     assert record

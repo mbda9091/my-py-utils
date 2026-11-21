@@ -889,7 +889,7 @@ wheels = [
 
 [[package]]
 name = "repo-security"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/repo-security" }
 
 [[package]]
