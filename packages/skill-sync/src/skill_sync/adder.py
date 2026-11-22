@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import shutil
@@ -207,7 +208,14 @@ def _validate_relative_links(root: Path) -> None:
         if not path.is_symlink() or path.readlink().is_absolute():
             continue
         try:
-            resolved = path.resolve()
+            try:
+                # Python 3.13+ suppresses symlink loops in non-strict mode.
+                resolved = path.resolve(strict=True)
+            except OSError as error:
+                if error.errno == errno.ELOOP:
+                    raise
+                # Preserve the existing handling of dangling internal links.
+                resolved = path.resolve()
         except (OSError, RuntimeError) as exc:
             msg = f"Cannot resolve relative symlink before moving skill: {path}"
             raise SkillSyncError(msg) from exc
