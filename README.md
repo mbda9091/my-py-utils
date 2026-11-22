@@ -36,6 +36,10 @@ Codex 会话导出：
 [方案文档](docs/codex-session-export-design.md) ·
 [实施文档](docs/codex-session-export-implementation.md)。
 
+DSH / Codex 会话文件扫描：
+[使用说明](packages/session-scan/README.md) ·
+[方案与验收](docs/archive/session-scan-plan.md)。
+
 macOS 原生闹钟（首次需要配置快捷指令）：
 [system-alarm 使用说明](<packages/system-alarm/README.md>)。
 
