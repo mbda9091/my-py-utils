@@ -88,6 +88,20 @@ def test_changing_index_falls_back_to_file_header(
     assert [issue.code for issue in found.errors] == ["index_read_error"]
 
 
+def test_missing_default_root_is_only_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing"))
+    dsh = tmp_path / "dsh"
+    expected = write_session(dsh, "dsh", compressed=True)
+    assert main(["--dsh-root", str(dsh)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert [row["path"] for row in result["results"]] == [str(expected)]
+    assert not result["errors"]
+    assert result["warnings"]
+    assert all(issue["code"] == "missing_root" for issue in result["warnings"])
+
+
 def test_inaccessible_default_root_preserves_other_source_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

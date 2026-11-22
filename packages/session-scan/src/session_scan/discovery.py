@@ -5,6 +5,7 @@ import sqlite3
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from stat import S_ISDIR
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 
@@ -28,13 +29,15 @@ if TYPE_CHECKING:
 
 def _inspect_root(root: Path, result: Discovery) -> Path | None:
     try:
-        if not root.exists():
-            result.warnings.append(Issue("missing_root", root, "Session directory is missing"))
-            return None
-        if not root.is_dir():
+        # Path.exists/is_dir suppress permission errors on Python 3.14+.
+        status = root.stat()
+        if not S_ISDIR(status.st_mode):
             result.errors.append(Issue("invalid_root", root, "Session root is not a directory"))
             return None
         allowed = root.resolve()
+    except FileNotFoundError:
+        result.warnings.append(Issue("missing_root", root, "Session directory is missing"))
+        return None
     except (OSError, RuntimeError):
         result.errors.append(
             Issue("directory_read_error", root, "Cannot inspect session directory")
