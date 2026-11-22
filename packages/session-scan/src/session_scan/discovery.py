@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 
 from .models import (
@@ -19,22 +21,32 @@ from .models import (
 from .reader import DSH_NAME, SessionReader
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-    from pathlib import Path
+    from collections.abc import Generator, Iterator
 
     from .models import Object, Source
 
 
-def _candidates(root: Path, source: Source, result: Discovery) -> Iterator[Path]:
+def _inspect_root(root: Path, result: Discovery) -> Path | None:
     try:
         if not root.exists():
             result.warnings.append(Issue("missing_root", root, "Session directory is missing"))
-            return
+            return None
+        if not root.is_dir():
+            result.errors.append(Issue("invalid_root", root, "Session root is not a directory"))
+            return None
         allowed = root.resolve()
     except (OSError, RuntimeError):
         result.errors.append(
             Issue("directory_read_error", root, "Cannot inspect session directory")
         )
+        return None
+    result.available_roots += 1
+    return allowed
+
+
+def _candidates(root: Path, source: Source, result: Discovery) -> Iterator[Path]:
+    allowed = _inspect_root(root, result)
+    if allowed is None:
         return
 
     def onerror(_error: OSError) -> None:
@@ -85,12 +97,54 @@ def _file(path: Path, source: Source) -> SessionFile:
         )
 
 
+def _index_stamp(path: Path) -> tuple[int, int, int, int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+def _copy_index_file(source: Path, target: Path, size: int) -> None:
+    with source.open("rb") as raw, target.open("wb") as output:
+        remaining = size
+        while remaining:
+            data = raw.read(min(remaining, 64 * 1024))
+            if not data:
+                msg = "Codex metadata index was truncated during copying"
+                raise OSError(msg)
+            output.write(data)
+            remaining -= len(data)
+
+
+@contextmanager
+def _index_snapshot(database: Path) -> Generator[Path, None, None]:
+    # SQLite may create or update SHM even with mode=ro. Open only private copies.
+    sources = [database.with_name(database.name + suffix) for suffix in ("", "-wal", "-journal")]
+    before = [_index_stamp(source) for source in sources]
+    if before[0] is None:
+        msg = "Codex metadata index disappeared"
+        raise FileNotFoundError(msg)
+    with TemporaryDirectory(prefix="session-scan-index-") as directory:
+        target = Path(directory) / database.name
+        for source, stamp in zip(sources, before, strict=True):
+            if stamp is not None:
+                _copy_index_file(source, target.with_name(source.name), stamp[2])
+        if [_index_stamp(source) for source in sources] != before:
+            msg = "Codex metadata index changed during copying"
+            raise OSError(msg)
+        yield target
+
+
 def _enrich(home: Path, result: Discovery) -> None:
     database = home / "state_5.sqlite"
     try:
         if not database.exists():
             return
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+        with (
+            _index_snapshot(database) as snapshot,
+            closing(sqlite3.connect(snapshot.as_uri() + "?mode=ro", uri=True)) as connection,
+        ):
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only=ON")
             connection.execute("BEGIN")

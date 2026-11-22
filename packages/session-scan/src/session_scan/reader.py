@@ -47,6 +47,28 @@ class _Snapshot(io.RawIOBase):
         return len(data)
 
 
+class _DecodedChunks(io.RawIOBase):
+    """Deliver available decoded bytes before attempting the following frame."""
+
+    def __init__(self, decoder: zstandard.ZstdDecompressionReader) -> None:
+        self.decoder = decoder
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: WriteableBuffer) -> int:
+        view = memoryview(buffer).cast("B")
+        data = self.decoder.read1(len(view))
+        view[: len(data)] = data
+        return len(data)
+
+    def close(self) -> None:
+        try:
+            cast("io.IOBase", self.decoder).close()
+        finally:
+            super().close()
+
+
 def _skip_blocks(take: Callable[[int], bytes], skip: Callable[[int], None]) -> None:
     while True:
         block = int.from_bytes(take(3), "little")
@@ -116,7 +138,8 @@ class SessionReader:
         try:
             self._raw = self._stack.enter_context(self.path.open("rb"))
             self._initial = os.fstat(self._raw.fileno())
-            row = self._line(HEADER_LIMIT, self._open_stream())
+            self._open_stream()
+            row = self._line(HEADER_LIMIT)
             if row is None:
                 self._fail("invalid_header", "Missing session header")
             self.header = self._header(row)
@@ -142,14 +165,14 @@ class SessionReader:
     def _fail(self, code: str, message: str) -> Never:
         raise ScanError(Issue(code, self.path, message, self.line_number))
 
-    def _open_stream(self) -> bytes | None:
+    def _open_stream(self) -> None:
         if self._raw is None or self._initial is None:
             msg = "Reader is not open"
             raise RuntimeError(msg)
         bounded = _Snapshot(self._raw, self._initial.st_size)
         if not self.path.name.endswith(".zstd"):
             self._stream = self._stack.enter_context(io.BufferedReader(bounded, BUFFER_SIZE))
-            return None
+            return
         decoder = self._stack.enter_context(
             zstandard.ZstdDecompressor().stream_reader(
                 cast("BinaryIO", bounded),
@@ -158,23 +181,15 @@ class SessionReader:
                 closefd=False,
             )
         )
-        # Do not fill a decoded 8 KiB buffer across the independent DSH header frame.
-        first = bytearray()
-        while len(first) <= HEADER_LIMIT:
-            byte = decoder.read(1)
-            if not byte:
-                break
-            first.extend(byte)
-            if byte == b"\n":
-                break
-        self._stream = self._stack.enter_context(io.BufferedReader(decoder, BUFFER_SIZE))
-        return bytes(first)
+        self._stream = self._stack.enter_context(
+            io.BufferedReader(_DecodedChunks(decoder), BUFFER_SIZE)
+        )
 
-    def _line(self, limit: int, first: bytes | None = None) -> Object | None:
+    def _line(self, limit: int) -> Object | None:
         if self._stream is None:
             msg = "Reader is not open"
             raise RuntimeError(msg)
-        raw = self._stream.readline(limit + 1) if first is None else first
+        raw = self._stream.readline(limit + 1)
         if not raw:
             return None
         self.line_number += 1
@@ -251,7 +266,8 @@ class SessionReader:
         self.complete = False
         self._iterated = False
         self.line_number = 0
-        self._line(HEADER_LIMIT, self._open_stream())
+        self._open_stream()
+        self._line(HEADER_LIMIT)
 
     def _finish(self) -> None:
         if self._raw is None or self._initial is None:

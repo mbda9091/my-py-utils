@@ -138,6 +138,30 @@ def test_invalid_filters_do_not_access_sources(
     assert caught.value.code == INVALID_ARGUMENTS
 
 
+@pytest.mark.parametrize("option", ["--directory", "--codex-home", "--dsh-root", "CODEX_HOME"])
+def test_unexpandable_paths_are_argument_errors(
+    option: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = "~session-scan-user-that-does-not-exist-20261121/project"
+    arguments = [option, path]
+    if option == "CODEX_HOME":
+        monkeypatch.setenv("CODEX_HOME", path)
+        arguments = []
+
+    def unexpected(**_kwargs: object) -> Discovery:
+        pytest.fail("Invalid path accessed discovery")
+
+    monkeypatch.setattr("session_scan.main.discover", unexpected)
+    with pytest.raises(SystemExit) as caught:
+        main(arguments)
+    assert caught.value.code == INVALID_ARGUMENTS
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "error:" in captured.err
+    assert "Could not determine home directory" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_no_time_or_excluded_directory_does_not_iterate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

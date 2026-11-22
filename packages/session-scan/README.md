@@ -46,6 +46,12 @@ must agree on version 0, 3 or 4; both `.jsonl` and `.jsonl.zstd` are supported.
 DSH's persistence backend defaults to Zstandard and also supports explicitly
 configured uncompressed storage. This reader does not change either setting.
 
+Codex index queries run against a private temporary copy of the database and its
+WAL/rollback journal, so SQLite cannot create or update sidecars in the source
+directory. Copies are bounded to the observed sizes and removed after use. A
+source change during copying reports an index error and preserves file-header
+metadata. This adds temporary disk I/O proportional to the index and its journals.
+
 The Python API keeps discovery separate from message reading:
 
 ```python

@@ -25,32 +25,21 @@ def main(argv: list[str] | None = None) -> int:
         filters = compile_filters(
             args.directory, exact=args.exact_directory, since=args.since, until=args.until
         )
-    except ValueError as error:
+        for name in ("codex_home", "dsh_root"):
+            value: str | None = getattr(args, name)
+            if value is not None and (not value.strip() or not normalize(value).is_dir()):
+                parser.error(f"--{name.replace('_', '-')} must be an existing directory")
+        codex_home = normalize(args.codex_home or os.environ.get("CODEX_HOME") or "~/.codex")
+        dsh_root = normalize(args.dsh_root or "~/.dsh/sessions")
+    except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
-    for name in ("codex_home", "dsh_root"):
-        value: str | None = getattr(args, name)
-        if value is not None and (not value.strip() or not normalize(value).is_dir()):
-            parser.error(f"--{name.replace('_', '-')} must be an existing directory")
-    codex_home = normalize(args.codex_home or os.environ.get("CODEX_HOME") or "~/.codex")
-    dsh_root = normalize(args.dsh_root or "~/.dsh/sessions")
     try:
         found = discover(
             codex_home=codex_home if args.source != "dsh" else None,
             dsh_root=dsh_root if args.source != "codex" else None,
         )
         entries, summary, errors = select_files(found, filters)
-        available = any(
-            root.is_dir()
-            for root in (
-                (
-                    [codex_home / "sessions", codex_home / "archived_sessions"]
-                    if args.source != "dsh"
-                    else []
-                )
-                + ([dsh_root] if args.source != "codex" else [])
-            )
-        )
-        code = 2 if not available else int(bool(errors))
+        code = 2 if not found.available_roots else int(bool(errors))
         print(
             json.dumps(
                 {

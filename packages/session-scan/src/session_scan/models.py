@@ -127,3 +127,4 @@ class Discovery:
     errors: list[Issue] = field(default_factory=list[Issue])
     warnings: list[Issue] = field(default_factory=list[Issue])
     candidates: int = 0
+    available_roots: int = 0
