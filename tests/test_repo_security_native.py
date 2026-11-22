@@ -172,17 +172,53 @@ def test_unrelated_branch_metadata_change_during_install_is_preserved(
     assert fake_install == [repository]
 
 
-def test_worktree_configuration_is_isolated(repository: Path) -> None:
+@pytest.mark.parametrize("worktree_config", [False, True])
+@pytest.mark.parametrize("install_from_linked", [False, True])
+def test_registration_is_shared_across_worktrees(
+    repository: Path, *, worktree_config: bool, install_from_linked: bool
+) -> None:
     git(repository, "commit", "--allow-empty", "-qm", "baseline")
-    git(repository, "config", "extensions.worktreeConfig", "true")
+    if worktree_config:
+        git(repository, "config", "extensions.worktreeConfig", "true")
     worktree = repository.parent / "linked checkout"
     git(repository, "worktree", "add", "--detach", str(worktree))
-    common_before = (repository / ".git/config").read_bytes()
-    setup_repository(worktree)
-    assert (repository / ".git/config").read_bytes() == common_before
-    assert git(repository, "hook", "list", "pre-commit", check=False).returncode == 1
-    assert git(worktree, "hook", "list", "-z", "pre-commit").stdout == "repo-security\0"
-    assert manage.read_record(worktree)
+    private_configs: dict[Path, tuple[bytes, int]] = {}
+    if worktree_config:
+        for checkout in (repository, worktree):
+            git(checkout, "config", "--worktree", "example.checkout", checkout.name)
+            config = hook_config.git_layout(checkout).git_dir / "config.worktree"
+            private_configs[config] = config.read_bytes(), config.stat().st_mtime_ns
+    target = worktree if install_from_linked else repository
+    setup_repository(target)
+    for checkout in (repository, worktree):
+        assert git(checkout, "hook", "list", "-z", "pre-commit").stdout == "repo-security\0"
+        layout = hook_config.git_layout(checkout)
+        assert layout.scope == "local"
+        assert layout.config == repository / ".git/config"
+    record = manage.read_record(target)
+    assert record
+    assert record["hook_scope"] == "local"
+    for config, before in private_configs.items():
+        assert (config.read_bytes(), config.stat().st_mtime_ns) == before
+    before = installation.snapshot(repository), installation.snapshot(worktree)
+    setup_repository(target)
+    assert (installation.snapshot(repository), installation.snapshot(worktree)) == before
+
+
+def test_worktree_registration_conflict_is_preserved_for_explicit_review(repository: Path) -> None:
+    git(repository, "config", "extensions.worktreeConfig", "true")
+    git(
+        repository,
+        "config",
+        "--worktree",
+        "hook.repo-security.command",
+        hook_config.SECURITY_COMMAND,
+    )
+    git(repository, "config", "--worktree", "hook.repo-security.event", "pre-commit")
+    before = installation.snapshot(repository)
+    with pytest.raises(RepoSecurityError, match="another scope"):
+        setup_repository(repository)
+    assert installation.snapshot(repository) == before
 
 
 @pytest.mark.parametrize(

@@ -40,7 +40,7 @@ Existing named hooks, traditional hook files, permissions and `core.hooksPath`
 remain intact. If another tool already uses the name, setup chooses a stable
 unused name and records it locally. No traditional dispatcher or `10-security`
 link is created. Only this tool's registration is moved to the end of the managed
-local/worktree config on setup; other hooks retain their relative order.
+repository's shared local config on setup; other hooks retain their relative order.
 Repeating setup keeps one registration and avoids writes when it is already current.
 Git runs traditional hooks after configured hooks. Later registrations, includes
 and command-scope settings may also run after security; setup does not reorder
@@ -186,14 +186,18 @@ without NLP model downloads or cloud rules. Binary/unsupported text encodings
 produce PII coverage warnings; submodules and files over 5 MiB block. External
 scanners time out after 60 seconds per snapshot. Review precise rule exceptions
 yourself; setup does not add allowlists automatically. Bare repositories and
-submodule checkouts are unsupported. Linked worktrees require an already enabled
-`extensions.worktreeConfig` and use their own `config.worktree`, setup lock,
-installation record and scanner environment. Setup does not enable the shared
-extension or delete hooks owned by the main checkout. An active shared old security
-entry must first be migrated in its owning checkout. If the checkout already has
-an independent `core.hooksPath`, setup leaves the inactive shared entry untouched
-and configures only this worktree. Preparing that isolation is an explicit
-workspace operation; setup does not change hooksPath to hide existing checks.
+submodule checkouts are unsupported. Setup always registers the hook in the
+repository's shared config (`git rev-parse --git-common-dir` followed by `config`),
+so the main checkout and linked worktrees inherit one registration. Setup works
+with or without `extensions.worktreeConfig` and leaves existing `config.worktree`
+files and `core.hooksPath` unchanged. Existing per-worktree registrations that
+conflict with the shared registration require explicit review; setup does not
+silently remove or migrate them. The relative hook command runs in the checkout
+where Git triggers it. Each checkout still needs its reviewed `.security` files,
+scanner environment and local installation record; sharing registration does not
+share scanner dependencies or initialize a new checkout. Setup locks remain in
+each checkout's actual Git directory, while shared configuration writes use Git's
+common config lock.
 Native Windows is unsupported;
 The observed WSL2 Linux environment does not establish native Windows or
 Windows-mounted filesystem support.

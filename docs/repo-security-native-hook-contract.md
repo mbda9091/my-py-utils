@@ -24,11 +24,11 @@
 2026-11-21 用户决定移除旧安装清理与迁移。本工具只安装自身扫描资源并注册原生 pre-commit，不检查其他工具的成员目录，不删除旧入口，不改写 hooksPath，也不生成项目检查适配脚本。
 不支持的清单或资源冲突在写入前报告；其他工具继续管理各自的安装与配置。
 
-## 工作树隔离
+## 仓库共享注册
 
-实测未开启 `extensions.worktreeConfig` 时，linked worktree 的 `git config --worktree` 返回 128。
-开启后，工作树配置仅在对应检出可见；linked worktree 的 `.git` 是文件。
-安装器应解析真实 Git 管理目录，只在已具备隔离前提时接入；不能静默改变共享扩展、hooksPath 或其他 hook。
+2026-11-21 用户决定固定采用仓库共享注册。安装器通过 Git 解析公共管理目录，始终将原生注册写入其中的 `config`，不再写入 `config.worktree`，也不要求开启 `extensions.worktreeConfig`。
+主检出和 linked worktree 继承同一份注册，由 Git 在当前检出触发同一条扫描路径。既有工作树配置、hooksPath 和其他 hook 保留；冲突的旧作用域注册须显式处理，安装器不自动迁移。
+共享的是注册，不是各检出的扫描器环境或安装记录。每个检出仍需准备本地扫描资源；安装锁定位到其真实 Git 管理目录，共享配置写入使用公共 `config.lock`。
 
 ## 验证边界
 

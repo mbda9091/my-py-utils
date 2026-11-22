@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -112,6 +113,48 @@ def test_dry_run_has_no_mutations_or_install(
     assert not fake_install
     assert snapshot(repository) == before
     assert not (repository / ".security").exists()
+
+
+@pytest.mark.parametrize("entry", ["preview", "cli", "standalone"])
+def test_unwritable_shared_config_is_rejected_before_writes(
+    repository: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fake_install: list[Path],
+    entry: str,
+) -> None:
+    git(repository, "commit", "--allow-empty", "-qm", "Baseline")
+    worktree = tmp_path / "linked checkout"
+    git(repository, "worktree", "add", "--detach", str(worktree))
+    if entry == "standalone":
+        write_template(worktree)
+    layout = manage.hook_config.git_layout(worktree)
+    common = layout.config.parent
+    original_mode = common.stat().st_mode
+    try:
+        common.chmod(original_mode & ~0o222)
+        if os.access(common, os.W_OK):
+            pytest.skip("Directory write permissions are not enforced for this user")
+        assert os.access(layout.git_dir, os.W_OK)
+        before = snapshot(repository), snapshot(worktree)
+        message = "Shared Git configuration directory must be writable"
+        if entry == "standalone":
+            with pytest.raises(RepoSecurityError, match=message):
+                manage.standalone_main(worktree / ".security", install_hooks=True)
+        else:
+            args = ["setup", str(worktree)]
+            if entry == "preview":
+                args.append("--dry-run")
+            assert main(args) == ERROR_EXIT
+            output = capsys.readouterr()
+            assert message in output.out + output.err
+            assert str(common) in output.out + output.err
+        assert (snapshot(repository), snapshot(worktree)) == before
+        assert not fake_install
+        assert not (worktree / manage.MANIFEST).exists()
+        assert not (layout.git_dir / "repo-security-setup.lock").exists()
+    finally:
+        common.chmod(original_mode)
 
 
 def test_conflicts_are_aggregated_in_read_only_plan(
@@ -402,7 +445,9 @@ def test_gitleaks_valid_archive_reuse_and_corruption_repair(
     assert (tmp_path / "bin/gitleaks").read_bytes() == content
 
 
-def test_bare_and_linked_worktree_are_rejected(repository: Path, tmp_path: Path) -> None:
+def test_bare_is_rejected_and_linked_worktree_preview_is_read_only(
+    repository: Path, tmp_path: Path
+) -> None:
     bare = tmp_path / "bare.git"
     git(repository, "init", "--bare", "-q", str(bare))
     assert main(["setup", str(bare), "--dry-run"]) == ERROR_EXIT
@@ -411,7 +456,9 @@ def test_bare_and_linked_worktree_are_rejected(repository: Path, tmp_path: Path)
     git(repository, "commit", "-qm", "Initial")
     worktree = tmp_path / "worktree"
     git(repository, "worktree", "add", "--detach", str(worktree))
-    assert main(["setup", str(worktree), "--dry-run"]) == ERROR_EXIT
+    before = snapshot(repository), snapshot(worktree)
+    assert main(["setup", str(worktree), "--dry-run"]) == 0
+    assert (snapshot(repository), snapshot(worktree)) == before
     assert not (worktree / ".security").exists()
 
 

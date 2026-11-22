@@ -114,7 +114,7 @@
       "source_sha256": null,
       "resource": "manage.py",
       "destination": ".security/manage.py",
-      "sha256": "bbfc7b38c3a33fcc56ccad7b8ac0bd8313d1d844d40305055d1f7a58116c72f8",
+      "sha256": "c97a2f1239077c7b8b0d80c76ed0f30c1f9c8e116ad799bd7c5320c5e93ff1a3",
       "executable": false
     },
     {
@@ -122,7 +122,7 @@
       "source_sha256": null,
       "resource": "hook_config.py",
       "destination": ".security/hook_config.py",
-      "sha256": "e70e336f8f37b00527a504aa600829985a2d2e7e49619d82ab3461f0259d1475",
+      "sha256": "bac42b9b72e8b196abdd38c554b5b6cf239bd36f80cc2abd60f58768584870b1",
       "executable": false
     }
   ]
