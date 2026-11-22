@@ -28,7 +28,12 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("path", type=Path)
     scan = commands.add_parser("scan", help="Scan Git snapshots with the installed local runtime")
     scan.add_argument("path", type=Path)
-    scan.add_argument("--mode", choices=("staged", "head", "history"), default="staged")
+    scan.add_argument(
+        "--mode",
+        choices=("staged", "head", "history"),
+        default="staged",
+        help="staged: changed files; head/history: full snapshots",
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "setup":

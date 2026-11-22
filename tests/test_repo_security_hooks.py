@@ -69,6 +69,10 @@ def test_index_changes_from_other_hooks_are_scanned_before_commit(
     phone = "139" + "12345678"
     (root / "sample.py").write_text("print('safe before generator')\n")
     git(root, "add", "sample.py")
+    git(root, "commit", "--no-verify", "-qm", "Generator baseline")
+    before = git(root, "rev-parse", "HEAD").stdout
+    (root / "ordinary.txt").write_text("safe user change\n")
+    git(root, "add", "ordinary.txt")
     executable(
         root / ".project-hooks" / name,
         "printf '%s\\n' 'phone = \"" + phone + "\"' > sample.py\ngit add -- sample.py\n",
@@ -80,7 +84,7 @@ def test_index_changes_from_other_hooks_are_scanned_before_commit(
     assert "CN_MOBILE_PHONE" in output
     assert phone not in output
     assert output.count("Checking staged snapshot") == 1
-    assert git(root, "rev-parse", "--verify", "HEAD", check=False).returncode != 0
+    assert git(root, "rev-parse", "HEAD").stdout == before
 
 
 @pytest.mark.parametrize("damage", ["missing-security", "disabled-security"])

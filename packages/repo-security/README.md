@@ -45,9 +45,11 @@ Repeating setup keeps one registration and avoids writes when it is already curr
 Git runs traditional hooks after configured hooks. Later registrations, includes
 and command-scope settings may also run after security; setup does not reorder
 those sources or require security to be the absolute final hook at runtime.
-The scan covers the index when security is invoked, including earlier hooks'
-staged changes, but cannot cover later hooks' changes. Scanning preserves Git's
-commit-specific index, including `git commit --only`.
+The scan checks added, modified and type-changed files, plus rename/copy destination
+paths, in the index when security is invoked. It includes earlier hooks' staged
+changes, but cannot cover later hooks' changes. Scanning preserves Git's
+commit-specific index, including `git commit --only`, and reads the file list and
+complete file contents from one fixed tree. Unchanged files are excluded.
 
 After deploying reviewed files, setup enables the hook before
 installing tools; the hook blocks commits while setup is incomplete or locked.
@@ -156,8 +158,15 @@ Python entry point that verifies tools and leaves Git settings unchanged (used b
 updates to an existing managed native installation require the normal hook-enabled
 entry point. Do not commit the installation manifest, virtual environment or binaries.
 
-`scan` defaults to `staged`; `head` scans HEAD, and `history` scans locally
-reachable commits without fetching. Shallow repositories show an explicit coverage
+`scan` defaults to `staged`, which scans only files whose content, type, mode or
+path differs from HEAD, using each selected file's complete staged contents rather
+than just added diff lines. Deletions are excluded. Rename/copy destination paths
+are scanned even when their content is unchanged. On the first commit, all staged
+files are new and are scanned. Empty or deletion-only changes scan zero files.
+`head` scans the full HEAD snapshot, and `history` scans full snapshots of locally
+reachable commits without fetching. Use these manual modes for an initial audit
+or after changing scan rules; an incremental pass does not audit unchanged files.
+Shallow repositories show an explicit coverage
 warning. Findings return 1; argument/environment/configuration errors return 2;
 either blocks hooks. Doctor returns 1 for an unhealthy installation and 2 for
 execution errors. Paths, lines and finding types are reported, not matched values.
@@ -169,7 +178,7 @@ checks the ready installation record, setup lock, unique enabled native registra
 registered file digests and permissions, Gitleaks provenance, scanner entry
 points and pinned Python package versions. Missing tools/configuration,
 incomplete setup, modified managed files or scanner errors reject the commit.
-This is a lightweight readiness check followed by one staged snapshot scan;
+This is a lightweight readiness check followed by one incremental staged scan;
 it does not run doctor's synthetic scans on every commit. Reviewed changes to
 managed runtime or policy files require renewing the local registration.
 

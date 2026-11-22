@@ -26,7 +26,7 @@
       "source_sha256": "95b05ae9e9f9f7ba6ef73e72f416a82229a3abefddb7ebb4bc0a6ff3c17aad25",
       "resource": "scan.py.template",
       "destination": ".security/scan.py",
-      "sha256": "c70c794e6734f12ab091bfadc85de6bae94bc1c83c86e7fbd366c33dd0d72c82",
+      "sha256": "85a92ed2790687afd9f63f5ec6238091a45dab7a7421fa2f02ed8ed2051e977a",
       "executable": false
     },
     {
