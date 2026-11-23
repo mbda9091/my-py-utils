@@ -25,9 +25,7 @@ def test_force_add_replaces_complete_skill_and_updates_existing_use_paths(tmp_pa
     destination = write_skill(config.repository_path / "skills")
     (destination / "old-only.txt").write_text("Old only")
     (destination / "reference.txt").write_text("Old reference")
-    installed = install_skill(
-        "demo-skill", config, target="codex", target_root=tmp_path / "installed"
-    ).path
+    installed = install_skill("demo-skill", config, target_root=tmp_path / "installed").path
     installed_inode = installed.lstat().st_ino
     run_git(["add", "skills"], cwd=config.repository_path)
     run_git(
@@ -104,7 +102,7 @@ def test_force_add_restores_source_repository_and_records_on_failure(
     config = make_personal_config(tmp_path)
     destination = write_skill(config.repository_path / "skills")
     (destination / "old-only.txt").write_text("Old data")
-    install_skill("demo-skill", config, target="codex", target_root=tmp_path / "installed")
+    install_skill("demo-skill", config, target_root=tmp_path / "installed")
     old_records = installations_path(config.state_home).read_bytes()
     old_inode = destination.stat().st_ino
     source = write_skill(tmp_path / "incoming")
@@ -291,9 +289,7 @@ def test_cli_force_add_succeeds_with_warning_for_readonly_old_backup(
     readonly.chmod(0o555)
     source = write_skill(tmp_path / "incoming")
     (source / "new-only.txt").write_text("New data")
-    installed = install_skill(
-        "demo-skill", config, target="codex", target_root=tmp_path / "installed"
-    ).path
+    installed = install_skill("demo-skill", config, target_root=tmp_path / "installed").path
     try:
         assert main(["add", str(source), "--force"]) == 0
 

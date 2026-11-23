@@ -76,7 +76,7 @@ def test_v1_config_and_multiple_use_paths_migrate_with_exact_backups(
     assert next(state.glob("config.json.*.bak")).read_bytes() == config_before
     assert next(state.glob("installations.json.*.bak")).read_bytes() == raw
     assert str(standard.readlink()) == original_target
-    install_skill("demo-skill", config, target="codex", force=True)
+    install_skill("demo-skill", config, force=True)
     assert standard.readlink() == new / "skills/demo-skill"
     assert custom.readlink() == old_skill
     assert old_skill.is_dir()
@@ -108,7 +108,7 @@ def test_m1_legacy_records_can_be_read_without_mutation_then_migrated(
 
     assert records[str(path)].source_path == old_skill
     assert installations_path(config.state_home).read_bytes() == raw
-    install_skill("demo-skill", config, target="codex", target_root=target_root, force=True)
+    install_skill("demo-skill", config, target_root=target_root, force=True)
     assert path.readlink() == config.repository_path / "skills/demo-skill"
     assert next(config.state_home.glob("installations.json.*.bak")).read_bytes() == raw
     assert (
@@ -132,7 +132,7 @@ def test_unknown_legacy_source_cannot_authorize_force(tmp_path: Path) -> None:
     assert record.source_path is None
     assert installation_status(record, config.repository_path) == "unresolved"
     with pytest.raises(SkillSyncError, match="preserved"):
-        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+        install_skill("demo-skill", config, target_root=root, force=False)
     assert path.readlink() == third_party
     assert installations_path(config.state_home).read_bytes() == raw
 
@@ -162,7 +162,7 @@ def test_legacy_source_with_symlink_parent_traversal_stays_unresolved(tmp_path: 
     assert installation_status(record, config.repository_path) == "unresolved"
     assert installations_path(config.state_home).read_bytes() == raw
     with pytest.raises(SkillSyncError, match="preserved"):
-        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+        install_skill("demo-skill", config, target_root=root, force=False)
     assert path.resolve() == foreign
     assert installations_path(config.state_home).read_bytes() == raw
 
@@ -289,5 +289,5 @@ def test_invalid_backup_version_cannot_establish_personal_ownership(
 
     assert read_managed_installations(config.state_home)[str(path)].source_path is None
     with pytest.raises(SkillSyncError, match="preserved"):
-        install_skill("demo-skill", config, target="codex", target_root=path.parent, force=True)
+        install_skill("demo-skill", config, target_root=path.parent, force=False)
     assert path.readlink() == foreign

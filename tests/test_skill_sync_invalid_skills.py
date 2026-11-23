@@ -41,7 +41,7 @@ def test_batch_installs_healthy_skills_before_and_after_invalid_descriptor(
     _break_descriptor(invalid, kind)
     original = (invalid / "SKILL.md").read_bytes()
 
-    assert main(["install", "--all", "--target", "codex"]) == 1
+    assert main(["install", "--all"]) == 1
 
     output = capsys.readouterr()
     assert "Installed: 1; skipped: 0; failed: 1" in output.out
@@ -66,7 +66,7 @@ def test_batch_distinguishes_invalid_descriptor_from_same_name_skip(
     _break_descriptor(invalid, "description")
     original = (foreign / "SKILL.md").read_bytes()
 
-    assert main(["install", "--all", "--target", "codex"]) == 1
+    assert main(["install", "--all"]) == 1
 
     output = capsys.readouterr()
     assert "Installed: 1; skipped: 1; failed: 1" in output.out
@@ -87,8 +87,8 @@ def test_status_reports_installed_and_missing_paths_despite_invalid_descriptor(
     invalid = write_skill(config.repository_path / "skills", "alpha-skill")
     write_skill(config.repository_path / "skills", "beta-skill")
     root = home / ".agents/skills"
-    installed = install_skill("alpha-skill", config, target="codex", target_root=root)
-    missing = install_skill("beta-skill", config, target="codex", target_root=root)
+    installed = install_skill("alpha-skill", config, target_root=root)
+    missing = install_skill("beta-skill", config, target_root=root)
     missing.path.unlink()
     _break_descriptor(invalid, "description")
     config_before = config_path(config.state_home).read_bytes()
@@ -137,7 +137,7 @@ def test_all_invalid_descriptors_are_reported_individually(
     names = ("alpha-skill", "beta-skill")
     for name in names:
         _break_descriptor(write_skill(config.repository_path / "skills", name), "description")
-    args = [command, "--all", "--target", "codex"] if command == "install" else [command]
+    args = [command, "--all"] if command == "install" else [command]
 
     assert main(args) == (1 if command == "install" else 0)
 
@@ -166,11 +166,7 @@ def test_explicit_invalid_skill_commands_still_fail(
     monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
     invalid = write_skill(config.repository_path / "skills")
     _break_descriptor(invalid, "description")
-    args = (
-        ["install", invalid.name, "--target", "codex"]
-        if command == "install"
-        else ["validate", str(invalid)]
-    )
+    args = ["install", invalid.name] if command == "install" else ["validate", str(invalid)]
 
     assert main(args) == 1
 

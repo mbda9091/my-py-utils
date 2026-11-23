@@ -107,8 +107,10 @@ Keep CLI packages thin:
 ## skill-sync Rules
 
 `skill-sync` binds one persistent local personal skill repository. It absorbs
-explicitly selected skills and installs them as symlinks, preserving unrelated
-skills in the client directory. Git staging, commits, branches, identity and
+explicitly selected skills and installs them as symlinks in the user
+`~/.agents/skills` directory. Preserve unrelated entries by default; an explicit
+`install --force` may replace a same-name ordinary entry only after preserving
+it in a persistent backup outside the discovery directory. Git staging, commits, branches, identity and
 remote synchronization belong to the user. The tool's only Git subprocess is
 a fixed read-only repository-root check; do not add generic Git execution or
 restore the removed `publish`/`sync` workflows.

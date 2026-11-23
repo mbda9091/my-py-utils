@@ -212,9 +212,7 @@ def test_add_rejects_relative_escape_even_when_external_alias_resolves_back_insi
 
 
 @pytest.mark.parametrize("reference", ["one", "two", "two/missing.txt"])
-def test_add_rejects_relative_symlink_cycle_without_moving(
-    tmp_path: Path, reference: str
-) -> None:
+def test_add_rejects_relative_symlink_cycle_without_moving(tmp_path: Path, reference: str) -> None:
     config = make_personal_config(tmp_path)
     original = write_skill(tmp_path / "local")
     (original / "one").symlink_to(reference)

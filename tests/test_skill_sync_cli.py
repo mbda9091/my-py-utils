@@ -25,6 +25,8 @@ from tests.skill_sync_helpers import (
 ARGPARSE_USAGE_ERROR = 2
 
 
+ARGUMENT_ERROR = 2
+
 def test_cli_init_and_status_use_configured_state_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -88,14 +90,14 @@ def test_cli_install_all_uses_personal_repository(
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     write_skill(config.repository_path / "skills", "alpha-skill")
     write_skill(config.repository_path / "skills", "zeta-skill")
-    assert main(["install", "--all", "--target", "codex"]) == 0
+    assert main(["install", "--all"]) == 0
     output = capsys.readouterr()
     assert "Installed: 2; skipped: 0; failed: 0" in output.out
     assert output.err == ""
     assert (tmp_path / "home/.agents/skills/alpha-skill").is_symlink()
 
 
-@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("force", [False])
 def test_cli_install_all_preserves_foreign_content_and_warns_about_skipped_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -111,7 +113,7 @@ def test_cli_install_all_preserves_foreign_content_and_warns_about_skipped_skill
     existing = tmp_path / "home/.agents/skills/alpha-skill"
     existing.mkdir(parents=True)
     (existing / "keep.txt").write_text("Keep")
-    args = ["install", "--all", "--target", "codex"]
+    args = ["install", "--all"]
     if force:
         args.append("--force")
     assert main(args) == 0
@@ -127,7 +129,7 @@ def test_cli_install_all_preserves_foreign_content_and_warns_about_skipped_skill
 
 
 @pytest.mark.parametrize("kind", ["directory", "file", "link", "broken"])
-@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("force", [False])
 def test_cli_single_install_warns_and_skips_existing_content(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -155,7 +157,7 @@ def test_cli_single_install_warns_and_skips_existing_content(
             (other / "keep.txt").write_text("Keep")
         existing.symlink_to(other, target_is_directory=True)
     inode = existing.lstat().st_ino
-    args = ["install", "demo-skill", "--target", "codex"]
+    args = ["install", "demo-skill"]
     if force:
         args.append("--force")
 
@@ -187,7 +189,7 @@ def test_cli_install_all_can_skip_every_skill_without_failure(
         write_skill(config.repository_path / "skills", name)
         write_skill(tmp_path / "home/.agents/skills", name)
 
-    assert main(["install", "--all", "--target", "codex"]) == 0
+    assert main(["install", "--all"]) == 0
 
     output = capsys.readouterr()
     assert "Installed: 0; skipped: 2; failed: 0" in output.out
@@ -214,7 +216,7 @@ def test_cli_install_all_counts_skips_separately_from_real_errors(
 
     monkeypatch.setattr(Path, "symlink_to", fail_beta_link)
 
-    assert main(["install", "--all", "--target", "codex"]) == 1
+    assert main(["install", "--all"]) == 1
 
     output = capsys.readouterr()
     assert "Installed: 1; skipped: 1; failed: 1" in output.out
@@ -233,7 +235,7 @@ def test_cli_missing_skill_remains_an_error(
     config = make_personal_config(tmp_path)
     monkeypatch.setenv("SKILL_SYNC_HOME", str(config.state_home))
 
-    assert main(["install", "missing", "--target", "codex"]) == 1
+    assert main(["install", "missing"]) == 1
 
     output = capsys.readouterr()
     assert "Skill not found" in output.err
@@ -241,10 +243,12 @@ def test_cli_missing_skill_remains_an_error(
 
 
 def test_cli_install_requires_skill_name_or_all(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["install", "--target", "codex"]) == 1
+    with pytest.raises(SystemExit) as exc:
+        main(["install"])
+    assert exc.value.code == ARGUMENT_ERROR
 
     output = capsys.readouterr()
-    assert "Pass a skill name or --all." in output.err
+    assert "Pass a skill name or --all, not both." in output.err
 
 
 def test_cli_add_and_install_managed_skill(
@@ -264,7 +268,7 @@ def test_cli_add_and_install_managed_skill(
     assert original.is_symlink()
     assert main(["add", str(original)]) == 0
     assert "Skill already managed: demo-skill" in capsys.readouterr().out
-    assert main(["install", "demo-skill", "--target", "codex"]) == 0
+    assert main(["install", "demo-skill"]) == 0
     output = capsys.readouterr()
     assert "Installed skill: demo-skill" in output.out
     assert output.err == ""
@@ -323,7 +327,7 @@ def test_cli_reuses_single_repository_across_processes(tmp_path: Path) -> None:
     absorbed = write_skill(tmp_path / "external", "absorbed-skill")
     assert invoke("add", str(absorbed)).returncode == 0
     assert absorbed.is_symlink()
-    result = invoke("install", "demo-skill", "--target", "codex")
+    result = invoke("install", "demo-skill")
     assert result.returncode == 0, result.stderr
     installed = tmp_path / "home/.agents/skills/demo-skill"
     assert installed.is_symlink()

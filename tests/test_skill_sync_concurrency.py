@@ -49,7 +49,7 @@ print("START", flush=True)
 if action == "add":
     adder.add_skill(Path(source), config)
 elif action == "install":
-    installer.install_skill(Path(source).name, config, target="codex", target_root=Path(target))
+    installer.install_skill(Path(source).name, config, target_root=Path(target))
 else:
     try:
         repository.init_repository(Path(source), state_home=Path(state))
@@ -165,7 +165,7 @@ def test_failed_binding_rollback_does_not_erase_another_process_install(tmp_path
     write_skill(config.repository_path / "skills", "alpha")
     second_source = write_skill(config.repository_path / "skills", "beta")
     target = tmp_path / "installed"
-    install_skill("alpha", config, target="codex", target_root=target)
+    install_skill("alpha", config, target_root=target)
     new_repository = make_local_repository(tmp_path / "new")
     with ExitStack() as stack:
         first = _start(stack, "init-failure", config, new_repository, pause=True)
@@ -195,7 +195,7 @@ def test_mutation_rejects_configuration_obtained_before_rebinding(
             add_skill(original, config)
     else:
         with pytest.raises(SkillSyncError, match="binding changed"):
-            install_skill("demo-skill", config, target="codex", target_root=tmp_path / "installed")
+            install_skill("demo-skill", config, target_root=tmp_path / "installed")
     assert read_repository_config(config.state_home) == current
     assert not original.is_symlink()
     assert not read_managed_installations(config.state_home)

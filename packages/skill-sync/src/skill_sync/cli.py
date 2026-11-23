@@ -57,7 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install_parser.add_argument("skill_name", nargs="?")
     install_parser.add_argument("--all", action="store_true", dest="install_all")
-    install_parser.add_argument("--target", required=True, choices=("codex",))
     install_parser.add_argument("--force", action="store_true")
     return parser
 
@@ -71,6 +70,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "use add/install for local skill management."
         )
     args = parser.parse_args(arguments)
+    if args.command == "install" and (bool(args.skill_name) == bool(args.install_all)):
+        parser.error("Pass a skill name or --all, not both.")
     try:
         return _run_command(args, sys.stdout, sys.stderr)
     except (SkillSyncError, OSError) as exc:
@@ -130,7 +131,6 @@ def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         config = read_repository_config()
         return _install_all(
             config,
-            target=args.target,
             force=args.force,
             output=output,
             error_output=error_output,
@@ -145,20 +145,18 @@ def _run_install(args: argparse.Namespace, output: TextIO, error_output: TextIO)
         result = install_skill(
             skill_name,
             config,
-            target=args.target,
             force=args.force,
         )
     except TargetSkillExistsError as exc:
         error_output.write(f"[WARN] Skipped skill: {skill_name}. {exc}\n")
         return 0
-    _write_install_result(output, result)
+    _write_install_result(output, error_output, result)
     return 0
 
 
 def _install_all(
     config: RepositoryConfig,
     *,
-    target: str,
     force: bool,
     output: TextIO,
     error_output: TextIO,
@@ -173,7 +171,7 @@ def _install_all(
     failed = 0
     for name in names:
         try:
-            result = install_skill(name, config, target=target, force=force)
+            result = install_skill(name, config, force=force)
         except TargetSkillExistsError as exc:
             error_output.write(f"[WARN] Skipped skill: {name}. {exc}\n")
             skipped += 1
@@ -182,17 +180,22 @@ def _install_all(
             error_output.write(f"[ERROR] {name}: {exc}\n")
             failed += 1
             continue
-        _write_install_result(output, result)
+        _write_install_result(output, error_output, result)
         installed += 1
     output.write(f"Installed: {installed}; skipped: {skipped}; failed: {failed}\n")
     return int(failed > 0)
 
 
-def _write_install_result(output: TextIO, result: InstallResult) -> None:
+def _write_install_result(output: TextIO, error_output: TextIO, result: InstallResult) -> None:
     output.write(f"Installed skill: {result.name}\n")
-    output.write(f"target: {result.target}\n")
     output.write(f"path: {result.path}\n")
     output.write(f"source: {result.source_path}\n")
+    if result.backup_path is not None:
+        output.write(f"backup: {result.backup_path}\n")
+    if result.cleanup_path is not None:
+        error_output.write(
+            f"[WARN] Installation succeeded; inspect cleanup files: {result.cleanup_path}\n"
+        )
 
 
 def _write_status(output: TextIO, error_output: TextIO) -> None:

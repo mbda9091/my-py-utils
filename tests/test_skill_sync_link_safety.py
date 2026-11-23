@@ -26,7 +26,7 @@ def test_rollback_preserves_foreign_entry_replacing_link_before_capture(
     root = tmp_path / "installed"
     destination = root / "demo-skill"
     if force:
-        install_skill("demo-skill", config, target="codex", target_root=root)
+        install_skill("demo-skill", config, target_root=root)
         new = make_personal_config(tmp_path / "new")
         write_skill(new.repository_path / "skills")
         config = init_repository(new.repository_path, state_home=config.state_home)
@@ -57,11 +57,11 @@ def test_rollback_preserves_foreign_entry_replacing_link_before_capture(
         Mock(side_effect=OSError("record failed")),
     )
     with pytest.raises(SkillSyncError, match="preserved") as caught:
-        install_skill("demo-skill", config, target="codex", target_root=root, force=force)
+        install_skill("demo-skill", config, target_root=root, force=force)
 
     assert injected
     if kind == "directory":
-        saved = next(root.glob(".skill-sync-backup-*/withdrawn"))
+        saved = next((root.parent / ".skill-sync-backups" if force else root).glob("*/withdrawn"))
         assert (saved / "foreign.txt").read_text() == "Foreign data"
         assert str(saved) in str(caught.value)
     else:
@@ -69,7 +69,7 @@ def test_rollback_preserves_foreign_entry_replacing_link_before_capture(
         if kind == "symlink":
             assert destination.readlink() == foreign
     if force:
-        saved_old = next(root.glob(".skill-sync-backup-*/original"))
+        saved_old = next(root.parent.glob(".skill-sync-backups/*/original"))
         assert saved_old.readlink() == old_skill
         assert str(saved_old) in str(caught.value)
     assert (records_path.read_bytes() if records_path.exists() else None) == before
@@ -84,7 +84,7 @@ def test_rollback_does_not_unlink_shared_path_after_capturing_own_link(
     root = tmp_path / "installed"
     destination = root / "demo-skill"
     if force:
-        install_skill("demo-skill", config, target="codex", target_root=root)
+        install_skill("demo-skill", config, target_root=root)
         new = make_personal_config(tmp_path / "new")
         write_skill(new.repository_path / "skills")
         config = init_repository(new.repository_path, state_home=config.state_home)
@@ -111,7 +111,7 @@ def test_rollback_does_not_unlink_shared_path_after_capturing_own_link(
         Mock(side_effect=OSError("record failed")),
     )
     with pytest.raises(SkillSyncError):
-        install_skill("demo-skill", config, target="codex", target_root=root, force=force)
+        install_skill("demo-skill", config, target_root=root, force=force)
     assert injected
     assert destination.read_text() == "New occupant after capture"
 
@@ -125,7 +125,7 @@ def test_link_identity_is_established_before_publication(
     root = tmp_path / "installed"
     destination = root / "demo-skill"
     if force:
-        install_skill("demo-skill", config, target="codex", target_root=root)
+        install_skill("demo-skill", config, target_root=root)
         new = make_personal_config(tmp_path / "new")
         write_skill(new.repository_path / "skills")
         config = init_repository(new.repository_path, state_home=config.state_home)
@@ -143,7 +143,7 @@ def test_link_identity_is_established_before_publication(
         Mock(side_effect=OSError("record failed")),
     )
     with pytest.raises(SkillSyncError, match="preserved"):
-        install_skill("demo-skill", config, target="codex", target_root=root, force=force)
+        install_skill("demo-skill", config, target_root=root, force=force)
     assert destination.read_text() == "Replacement after publication"
 
 
@@ -154,7 +154,7 @@ def test_force_rejects_lexically_matching_target_through_foreign_symlink(
     config = make_personal_config(tmp_path)
     old_skill = write_skill(config.repository_path / "skills")
     root = tmp_path / "installed"
-    destination = install_skill("demo-skill", config, target="codex", target_root=root).path
+    destination = install_skill("demo-skill", config, target_root=root).path
     if rebind:
         new = make_personal_config(tmp_path / "new")
         write_skill(new.repository_path / "skills")
@@ -171,7 +171,7 @@ def test_force_rejects_lexically_matching_target_through_foreign_symlink(
     raw_link = destination.readlink()
 
     with pytest.raises(SkillSyncError, match="preserved"):
-        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+        install_skill("demo-skill", config, target_root=root, force=False)
 
     assert destination.readlink() == raw_link
     assert destination.resolve() == foreign
@@ -189,7 +189,7 @@ def test_force_accepts_provable_old_sources_including_removed_repository(
     old_repository = config.repository_path
     old_skill = write_skill(old_repository / "skills")
     root = tmp_path / "installed"
-    destination = install_skill("demo-skill", config, target="codex", target_root=root).path
+    destination = install_skill("demo-skill", config, target_root=root).path
     if target_form == "relative":
         destination.unlink()
         destination.symlink_to(os.path.relpath(old_skill, destination.parent))
@@ -199,7 +199,7 @@ def test_force_accepts_provable_old_sources_including_removed_repository(
     if missing != "none":
         shutil.rmtree(old_skill if missing == "skill" else old_repository)
 
-    install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+    install_skill("demo-skill", config, target_root=root, force=True)
 
     assert destination.readlink() == new_skill
     assert read_managed_installations(config.state_home)[str(destination)].source_path == new_skill
@@ -210,7 +210,7 @@ def test_force_preserves_unverifiable_broken_links(tmp_path: Path, target: str) 
     config = make_personal_config(tmp_path)
     skill = write_skill(config.repository_path / "skills")
     root = tmp_path / "installed"
-    destination = install_skill("demo-skill", config, target="codex", target_root=root).path
+    destination = install_skill("demo-skill", config, target_root=root).path
     destination.unlink()
     if target == "cycle":
         destination.symlink_to(destination)
@@ -223,7 +223,7 @@ def test_force_preserves_unverifiable_broken_links(tmp_path: Path, target: str) 
     before = installations_path(config.state_home).read_bytes()
 
     with pytest.raises(SkillSyncError, match="preserved"):
-        install_skill("demo-skill", config, target="codex", target_root=root, force=True)
+        install_skill("demo-skill", config, target_root=root, force=False)
 
     assert destination.readlink() == raw
     assert installations_path(config.state_home).read_bytes() == before
@@ -243,7 +243,7 @@ def test_current_personal_skill_alias_can_still_be_normalized(
     destination.symlink_to(alias / "skills" / "demo-skill")
 
     if operation == "install":
-        install_skill("demo-skill", config, target="codex", target_root=root)
+        install_skill("demo-skill", config, target_root=root)
     else:
         add_skill(destination, config)
 

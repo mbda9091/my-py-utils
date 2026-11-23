@@ -134,8 +134,8 @@ def test_all_local_commands_only_execute_fixed_readonly_root_checks(
     for args in (
         ["init", "--repo", str(repository)],
         ["add", str(absorbed)],
-        ["install", "absorbed-skill", "--target", "codex"],
-        ["install", "--all", "--target", "codex"],
+        ["install", "absorbed-skill"],
+        ["install", "--all"],
         ["list"],
         ["status"],
         ["validate", str(manual)],

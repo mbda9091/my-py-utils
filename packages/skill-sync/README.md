@@ -98,8 +98,8 @@ relative links and absolute links retain their stored targets.
 ## Install a personal skill
 
 ```bash
-skill-sync install foo --target codex
-skill-sync install --all --target codex
+skill-sync install foo
+skill-sync install --all
 ```
 
 Installation creates `~/.agents/skills/<name>` as an absolute symlink to the
@@ -107,26 +107,38 @@ personal skill. Existing links to the same skill are idempotent. Edit through
 either path to update the same real files; tracked changes appear in your
 normal Git diff. There is no installation copy, commit pin or publication step.
 
-Unknown directories, files, third-party links and unverified broken links are
-preserved even with `--force`. After explicitly rebinding a new personal
-repository, `--force` can relink a previously registered personal installation
-only when its actual link still matches the recorded old source. Replaced or
-unresolved records do not authorize overwriting content. The old source files
-are never deleted by relinking.
+Without `--force`, same-name directories, files and unrelated links are skipped
+with a warning. Explicit replacement first preserves the entire old entry:
 
-The destination is checked again before replacement and after moving the old
-link aside. The new link is prepared privately and placed at the destination
-without overwriting existing content. Rollback captures the current entry into
-a private directory before checking its identity; it only deletes the captured
-link when it belongs to this operation. Unexpected files and links are restored
-without overwriting a new occupant. Unexpected directories, occupied restoration
-paths and failed recovery retain their content in a reported backup.
+```bash
+skill-sync install foo --force
+skill-sync install --all --force
+```
 
-Source verification does not discard `..` before checking the traversed
-directories. Intermediate symlink aliases, cyclic links and parent traversal
-through missing paths or regular files cannot authorize `--force` or recover
-legacy ownership. Ordinary relative links through real directories and recorded
-direct links to a missing old skill or repository remain supported.
+The old directory, file or symlink itself is renamed into a unique private
+`~/.agents/.skill-sync-backups/<name>-<time>-<id>/original`. `backup.json`
+records the original path and source. Symlink targets are never moved or deleted.
+Successful backups remain until you remove them manually; their full paths are
+printed. Reinstalling the correct link does not create another backup. Backups
+sit outside the skill discovery directory. The destination and backup directory
+must share a filesystem; an unsupported cross-device rename fails safely.
+Special files and mount points are preserved with warnings even with `--force`.
+The installation path is always the current user's `~/.agents/skills`, regardless
+of the working directory. There is no `--target` or custom CLI install directory.
+
+Replacement checks the destination identity again after capturing it, and places
+the new link without overwriting an unexpected occupant. Failures before the
+link and record commit restore the original; failed recovery preserves its backup
+and reports the location. Successful replacement never deletes its persistent
+backup. To restore it manually, remove only the installed link after verifying
+its target, then move `original` back to the path in `backup.json`. Do not overwrite
+a new occupant. Relative links regain their original meaning after restoration.
+
+Source verification still rejects intermediate aliases and invalid parent
+traversal as proof of ownership in legacy installation records. Those records
+alone never authorize replacement; `--force` explicitly authorizes backing up
+the selected current entry. A link already resolving to the current personal
+skill may be normalized without force.
 
 `init`, `add`, and `install` share a process lock in the state directory. Concurrent
 commands wait until the current read/modify/write operation, including rollback,
@@ -182,7 +194,7 @@ backups.
 
 Old installation source paths are recovered only when an actual link matches a
 known old repository from configuration or its backups. Otherwise the record is
-preserved with an unknown source and cannot authorize `--force`. M1's previously
+preserved with an unknown source and cannot itself authorize overwriting content. M1's previously
 unversioned records can also be read without modification; their first update
 preserves a backup before writing schema v2.
 

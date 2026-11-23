@@ -41,16 +41,23 @@ def require_entry(path: Path, expected: EntryState | None) -> None:
 
 @contextmanager
 def link_directory(
-    destination: Path, source: Path, *, expected: EntryState | None
+    destination: Path,
+    source: Path,
+    *,
+    expected: EntryState | None,
+    persistent_backup: Path | None = None,
 ) -> Generator[Path | None]:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    backup_root = Path(mkdtemp(prefix=".skill-sync-backup-", dir=destination.parent))
+    backup_root = persistent_backup or Path(
+        mkdtemp(prefix=".skill-sync-backup-", dir=destination.parent)
+    )
     backup = backup_root / "original"
     new_link = backup_root / "new-link"
     preserve = False
     moved = False
     published = False
     created = None
+    committed = False
     try:
         try:
             if expected is not None:
@@ -64,6 +71,7 @@ def link_directory(
             os.link(new_link, destination, follow_symlinks=False)
             published = True
             yield backup if moved else None
+            committed = True
         except BaseException:
             try:
                 if published and created is not None:
@@ -80,7 +88,10 @@ def link_directory(
             raise
     finally:
         if not preserve:
-            shutil.rmtree(backup_root)
+            if committed and persistent_backup is not None:
+                new_link.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(backup_root)
 
 
 def _prepare_link(path: Path, source: Path) -> EntryState:
