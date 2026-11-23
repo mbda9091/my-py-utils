@@ -65,7 +65,7 @@ def _install_skill(
     same_skill = already_linked or _links_to_skill(destination, skill.path)
     if expected is not None and not same_skill:
         supported = any(test(expected.mode) for test in (S_ISDIR, S_ISREG, S_ISLNK))
-        if not force or not supported or destination.is_mount():
+        if not force or not supported or (S_ISDIR(expected.mode) and destination.is_mount()):
             msg = (
                 f"Target skill already exists: {destination}; existing content was preserved. "
                 "Pass --force to back up and replace an ordinary directory, file or link."

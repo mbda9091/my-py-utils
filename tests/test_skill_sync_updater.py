@@ -89,10 +89,20 @@ def test_update_fast_forwards_existing_links_and_preserves_state(update_setup: U
 
 
 @pytest.mark.parametrize("kind", ["staged", "unstaged", "untracked"])
+@pytest.mark.parametrize("invalid_catalog", [False, True])
 def test_update_refuses_local_changes_before_pull(
-    update_setup: UpdateSetup, monkeypatch: pytest.MonkeyPatch, kind: str
+    update_setup: UpdateSetup,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    *,
+    invalid_catalog: bool,
 ) -> None:
     repo = update_setup.config.repository_path
+    if invalid_catalog:
+        shutil.rmtree(repo / "skills")
+        (repo / "skills").write_text("Invalid catalog root")
+        run_git(["add", "--all"], cwd=repo)
+        run_git(["commit", "-m", "Record a broken catalog root"], cwd=repo)
     path = repo / ("untracked" if kind != "unstaged" else "README.md")
     path.write_text("Local work")
     if kind == "staged":
@@ -295,6 +305,59 @@ def test_update_invalid_catalog_root_still_reports_successful_pull(
     result = update_repository(setup.config)
     assert result.before_head != result.after_head
     assert any("catalog is invalid" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("kind", ["symlink", "file"])
+@pytest.mark.parametrize("entrypoint", ["api", "cli"])
+def test_update_pulls_catalog_repair_after_a_bad_update(
+    update_setup: UpdateSetup,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    entrypoint: str,
+) -> None:
+    setup = update_setup
+    installed = install_skill("demo-skill", setup.config).path
+    before_config = config_path(setup.config.state_home).read_bytes()
+    before_records = installations_path(setup.config.state_home).read_bytes()
+    skills = setup.upstream / "skills"
+    shutil.rmtree(skills)
+    if kind == "symlink":
+        skills.symlink_to("elsewhere")
+    else:
+        skills.write_text("Not a directory")
+    push(setup.upstream, "Break the skill catalog root")
+
+    if entrypoint == "api":
+        broken = update_repository(setup.config)
+        assert any("catalog is invalid" in warning for warning in broken.warnings)
+    else:
+        assert main(["update"]) == 0
+        assert "catalog is invalid" in capsys.readouterr().err
+    with pytest.raises(SkillSyncError, match="real directory"):
+        read_repository_config(setup.config.state_home)
+
+    skills.unlink()
+    restored = write_skill(skills)
+    descriptor = restored / "SKILL.md"
+    descriptor.write_text(descriptor.read_text() + "\nRecovered upstream skill\n")
+    push(setup.upstream, "Repair the skill catalog root")
+
+    if entrypoint == "api":
+        repaired = update_repository(setup.config)
+        assert repaired.before_head != repaired.after_head
+        assert not repaired.warnings
+    else:
+        assert main(["update"]) == 0
+        output = capsys.readouterr()
+        assert "Updated repository:" in output.out
+        assert not output.err
+    assert "Recovered upstream skill" in (installed / "SKILL.md").read_text()
+    assert run_git(["rev-parse", "HEAD"], cwd=setup.config.repository_path) == run_git(
+        ["rev-parse", "HEAD"], cwd=setup.upstream
+    )
+    assert read_repository_config(setup.config.state_home) == setup.config
+    assert config_path(setup.config.state_home).read_bytes() == before_config
+    assert installations_path(setup.config.state_home).read_bytes() == before_records
 
 
 def test_update_supports_git_worktree(update_setup: UpdateSetup, tmp_path: Path) -> None:

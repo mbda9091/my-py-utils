@@ -128,7 +128,7 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
 
 def _run_update(output: TextIO, error_output: TextIO) -> None:
     with mutation_lock(get_state_home()):
-        config = read_repository_config()
+        config = read_repository_config(check_catalog=False)
         output.write(f"Updating personal repository: {config.repository_path}\n")
         output.flush()
         result = update_repository(config)

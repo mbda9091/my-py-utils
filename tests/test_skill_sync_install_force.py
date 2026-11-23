@@ -230,3 +230,64 @@ def test_first_install_reports_postcommit_cleanup_failure(
     assert result.path.readlink() == source
     assert result.backup_path is None
     assert read_managed_installations(config.state_home)[str(result.path)].source_path == source
+
+
+def test_force_replaces_parent_directory_symlink_without_touching_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config = make_personal_config(tmp_path)
+    source = write_skill(config.repository_path / "skills")
+    root = Path.home() / ".agents/skills"
+    root.mkdir(parents=True)
+    sentinel = root / "keep.txt"
+    sentinel.write_text("Preserve the linked directory")
+    link = root / source.name
+    link.symlink_to(".")
+    inode = link.lstat().st_ino
+
+    result = install_skill(source.name, config, force=True)
+
+    assert link.readlink() == source
+    assert result.backup_path is not None
+    assert result.backup_path.readlink() == Path()
+    assert result.backup_path.lstat().st_ino == inode
+    assert sentinel.read_text() == "Preserve the linked directory"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
+def test_force_checks_mounts_only_for_real_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    config = make_personal_config(tmp_path)
+    source = write_skill(config.repository_path / "skills")
+    root = tmp_path / "installed"
+    root.mkdir()
+    path = root / source.name
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    (foreign / "keep.txt").write_text("Foreign contents")
+    if kind == "directory":
+        path.mkdir()
+    else:
+        path.symlink_to(foreign)
+    identity = path.lstat()
+
+    def is_mount(candidate: Path) -> bool:
+        if candidate == path and candidate.is_symlink():
+            pytest.fail("Mount detection must not follow the symlink target")
+        return candidate == path
+
+    monkeypatch.setattr(Path, "is_mount", is_mount)
+    if kind == "directory":
+        with pytest.raises(SkillSyncError, match="preserved"):
+            install_skill(source.name, config, force=True, target_root=root)
+        assert path.lstat().st_ino == identity.st_ino
+        assert not read_managed_installations(config.state_home)
+    else:
+        result = install_skill(source.name, config, force=True, target_root=root)
+        assert path.readlink() == source
+        assert result.backup_path is not None
+        assert result.backup_path.readlink() == foreign
+        assert result.backup_path.lstat().st_ino == identity.st_ino
+    assert (foreign / "keep.txt").read_text() == "Foreign contents"

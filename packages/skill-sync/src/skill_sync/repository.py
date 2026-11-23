@@ -86,8 +86,12 @@ def _init_repository(repository: Path, home: Path) -> RepositoryConfig:
     return config
 
 
-def require_current_binding(config: RepositoryConfig, *, allow_missing: bool = False) -> None:
-    current = read_repository_config(config.state_home, allow_missing=allow_missing)
+def require_current_binding(
+    config: RepositoryConfig, *, allow_missing: bool = False, check_catalog: bool = True
+) -> None:
+    current = read_repository_config(
+        config.state_home, allow_missing=allow_missing, check_catalog=check_catalog
+    )
     if current != config:
         msg = "Personal repository binding changed. Reload configuration and retry."
         raise SkillSyncError(msg)
@@ -101,7 +105,7 @@ def _restore_file(path: Path, contents: bytes | None) -> None:
 
 
 def read_repository_config(
-    state_home: Path | None = None, *, allow_missing: bool = False
+    state_home: Path | None = None, *, allow_missing: bool = False, check_catalog: bool = True
 ) -> RepositoryConfig:
     home = (get_state_home() if state_home is None else state_home).expanduser().resolve()
     payload = _read_payload(config_path(home))
@@ -117,7 +121,7 @@ def read_repository_config(
     if allow_missing and not config.repository_path.exists():
         _validate_locations(config.repository_path, home)
     else:
-        validate_repository(config.repository_path, home)
+        validate_repository(config.repository_path, home, check_catalog=check_catalog)
     return config
 
 
@@ -131,7 +135,7 @@ def _validate_locations(repository: Path, state_home: Path) -> None:
         raise SkillSyncError(msg)
 
 
-def validate_repository(repository: Path, state_home: Path) -> None:
+def validate_repository(repository: Path, state_home: Path, *, check_catalog: bool = True) -> None:
     _validate_locations(repository, state_home)
     if not repository.is_dir():
         msg = f"Local repository directory does not exist: {repository}"
@@ -141,7 +145,7 @@ def validate_repository(repository: Path, state_home: Path) -> None:
         msg = f"Use the Git repository root directory: {root}"
         raise SkillSyncError(msg)
     skills = repository / "skills"
-    if skills.is_symlink() or (skills.exists() and not skills.is_dir()):
+    if check_catalog and (skills.is_symlink() or (skills.exists() and not skills.is_dir())):
         msg = f"Personal skills path must be a real directory: {skills}"
         raise SkillSyncError(msg)
 

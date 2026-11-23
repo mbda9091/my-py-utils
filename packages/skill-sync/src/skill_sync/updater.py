@@ -46,7 +46,8 @@ class UpdateResult:
 
 def update_repository(config: RepositoryConfig) -> UpdateResult:
     with mutation_lock(config.state_home):
-        require_current_binding(config)
+        # A broken catalog must not prevent pulling an upstream repair.
+        require_current_binding(config, check_catalog=False)
         executable = shutil.which("git")
         if executable is None:
             msg = "git command not found."

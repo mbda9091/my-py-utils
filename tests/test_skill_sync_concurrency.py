@@ -9,6 +9,7 @@ from skill_sync.errors import SkillSyncError
 from skill_sync.installations import read_managed_installations
 from skill_sync.installer import install_skill
 from skill_sync.repository import init_repository, read_repository_config
+from skill_sync.updater import update_repository
 
 from tests.skill_sync_helpers import (
     assert_process_waiting,
@@ -84,7 +85,7 @@ def test_failed_binding_rollback_does_not_erase_another_process_install(tmp_path
     assert (target / "beta").resolve() == second_source
 
 
-@pytest.mark.parametrize("operation", ["add", "install"])
+@pytest.mark.parametrize("operation", ["add", "install", "update"])
 def test_mutation_rejects_configuration_obtained_before_rebinding(
     tmp_path: Path, operation: str
 ) -> None:
@@ -95,9 +96,12 @@ def test_mutation_rejects_configuration_obtained_before_rebinding(
     if operation == "add":
         with pytest.raises(SkillSyncError, match="binding changed"):
             add_skill(original, config)
-    else:
+    elif operation == "install":
         with pytest.raises(SkillSyncError, match="binding changed"):
             install_skill("demo-skill", config, target_root=tmp_path / "installed")
+    else:
+        with pytest.raises(SkillSyncError, match="binding changed"):
+            update_repository(config)
     assert read_repository_config(config.state_home) == current
     assert not original.is_symlink()
     assert not read_managed_installations(config.state_home)
