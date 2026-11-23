@@ -9,10 +9,11 @@ from stat import S_ISLNK
 from tempfile import mkdtemp
 from typing import TYPE_CHECKING
 
+from skill_sync.config import atomic_write_json
 from skill_sync.errors import SkillSyncError
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,3 +147,69 @@ def require_external_path(path: Path, repository: Path) -> None:
     if resolved.is_relative_to(repository_root) or repository_root.is_relative_to(resolved):
         msg = "Skill installation path must be outside the personal repository."
         raise SkillSyncError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedEntry:
+    original: Path
+    container: Path
+
+    @property
+    def path(self) -> Path:
+        return self.container / "original"
+
+
+@contextmanager
+def capture_entries(entries: Mapping[Path, EntryState]) -> Generator[list[CapturedEntry]]:
+    captured: list[CapturedEntry] = []
+    try:
+        for path, expected in entries.items():
+            captured.append(_capture_entry(path, expected))
+        yield captured
+    except BaseException as exc:
+        failures: list[str] = []
+        for entry in reversed(captured):
+            try:
+                _restore_entry(entry.path, entry.original)
+                shutil.rmtree(entry.container)
+            except OSError as restore_error:
+                failures.append(f"{entry.container}: {restore_error}")
+        if failures:
+            msg = f"Cannot restore removed entries; inspect recovery files: {'; '.join(failures)}"
+            raise SkillSyncError(msg) from exc
+        raise
+
+
+def _capture_entry(path: Path, expected: EntryState) -> CapturedEntry:
+    if link_path(path) != path:
+        msg = f"Skill parent path changed; existing content preserved: {path}"
+        raise SkillSyncError(msg)
+    require_entry(path, expected)
+    entry = CapturedEntry(
+        path, Path(mkdtemp(prefix=f".skill-sync-remove-{path.name}-", dir=path.parent))
+    )
+    try:
+        atomic_write_json(entry.container / "recovery.json", {"originalPath": str(path)})
+        require_entry(path, expected)
+        path.rename(entry.path)
+        require_entry(entry.path, expected)
+    except BaseException as exc:
+        try:
+            if entry_state(entry.path) is not None:
+                _restore_entry(entry.path, path)
+            shutil.rmtree(entry.container)
+        except OSError as restore_error:
+            msg = f"Original data kept at {entry.container}: {restore_error}"
+            raise SkillSyncError(msg) from exc
+        raise
+    return entry
+
+
+def cleanup_captured(entries: list[CapturedEntry]) -> tuple[Path, ...]:
+    remaining: list[Path] = []
+    for entry in entries:
+        try:
+            shutil.rmtree(entry.container)
+        except OSError:
+            remaining.append(entry.container)
+    return tuple(remaining)

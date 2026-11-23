@@ -23,12 +23,12 @@ if TYPE_CHECKING:
 _WORKER = """
 import sys
 from pathlib import Path
-from skill_sync import adder, installer, repository
+from skill_sync import adder, installer, repository, uninstaller
 
 action, pause, state, repo, source, target = sys.argv[1:]
 config = repository.RepositoryConfig(Path(repo), Path(state))
 if pause == "yes":
-    module = adder if action == "add" else installer
+    module = {"add": adder, "uninstall": uninstaller}.get(action, installer)
     if action == "init-failure":
         original = repository.atomic_write_json
         def paused_write(path, payload):
@@ -48,6 +48,9 @@ if pause == "yes":
 print("START", flush=True)
 if action == "add":
     adder.add_skill(Path(source), config)
+elif action == "uninstall":
+    uninstaller.agents_skills_root = lambda: Path(target)
+    uninstaller.uninstall_skill(Path(source).name, config)
 elif action == "install":
     installer.install_skill(Path(source).name, config, target_root=Path(target))
 else:
@@ -199,3 +202,21 @@ def test_mutation_rejects_configuration_obtained_before_rebinding(
     assert read_repository_config(config.state_home) == current
     assert not original.is_symlink()
     assert not read_managed_installations(config.state_home)
+
+
+def test_uninstall_process_serializes_with_install(tmp_path: Path) -> None:
+    config = make_personal_config(tmp_path)
+    alpha = write_skill(config.repository_path / "skills", "alpha")
+    beta = write_skill(config.repository_path / "skills", "beta")
+    target = tmp_path / "installed"
+    install_skill("alpha", config, target_root=target)
+    with ExitStack() as stack:
+        first = _start(stack, "uninstall", config, alpha, pause=True)
+        _expect_line(first, "READY")
+        second = _start(stack, "install", config, beta, pause=False)
+        _assert_waiting(second)
+        _finish(first)
+        _finish(second)
+    assert not (target / "alpha").is_symlink()
+    assert (target / "beta").readlink() == beta
+    assert set(read_managed_installations(config.state_home)) == {str(target / "beta")}

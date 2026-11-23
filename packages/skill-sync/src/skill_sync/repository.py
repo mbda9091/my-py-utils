@@ -86,8 +86,8 @@ def _init_repository(repository: Path, home: Path) -> RepositoryConfig:
     return config
 
 
-def require_current_binding(config: RepositoryConfig) -> None:
-    current = read_repository_config(config.state_home)
+def require_current_binding(config: RepositoryConfig, *, allow_missing: bool = False) -> None:
+    current = read_repository_config(config.state_home, allow_missing=allow_missing)
     if current != config:
         msg = "Personal repository binding changed. Reload configuration and retry."
         raise SkillSyncError(msg)
@@ -100,18 +100,28 @@ def _restore_file(path: Path, contents: bytes | None) -> None:
         atomic_write_bytes(path, contents)
 
 
-def read_repository_config(state_home: Path | None = None) -> RepositoryConfig:
+def read_repository_config(
+    state_home: Path | None = None, *, allow_missing: bool = False
+) -> RepositoryConfig:
     home = (get_state_home() if state_home is None else state_home).expanduser().resolve()
     payload = _read_payload(config_path(home))
     config = _config_from_payload(payload, home)
-    if config.repository_path.resolve() != config.repository_path:
+    try:
+        resolved = config.repository_path.resolve()
+    except (OSError, RuntimeError) as exc:
+        msg = f"Cannot resolve configured repository path: {exc}"
+        raise SkillSyncError(msg) from exc
+    if resolved != config.repository_path or config.repository_path.is_symlink():
         msg = f"Configured repository path now resolves to another location. {INIT_HINT}"
         raise SkillSyncError(msg)
-    validate_repository(config.repository_path, home)
+    if allow_missing and not config.repository_path.exists():
+        _validate_locations(config.repository_path, home)
+    else:
+        validate_repository(config.repository_path, home)
     return config
 
 
-def validate_repository(repository: Path, state_home: Path) -> None:
+def _validate_locations(repository: Path, state_home: Path) -> None:
     usage = (Path.home() / ".agents" / "skills").resolve()
     if repository.is_relative_to(usage) or usage.is_relative_to(repository):
         msg = f"Personal repository and agent skills directory must be separate: {repository}"
@@ -119,6 +129,10 @@ def validate_repository(repository: Path, state_home: Path) -> None:
     if state_home.is_relative_to(repository):
         msg = f"Personal repository must not contain the skill-sync state directory: {repository}"
         raise SkillSyncError(msg)
+
+
+def validate_repository(repository: Path, state_home: Path) -> None:
+    _validate_locations(repository, state_home)
     if not repository.is_dir():
         msg = f"Local repository directory does not exist: {repository}"
         raise SkillSyncError(msg)

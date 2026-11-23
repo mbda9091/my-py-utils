@@ -13,6 +13,7 @@ from skill_sync.installations import installation_status, read_managed_installat
 from skill_sync.installer import install_skill
 from skill_sync.locking import mutation_lock
 from skill_sync.repository import init_repository, read_repository_config
+from skill_sync.uninstaller import uninstall_skill
 from skill_sync.validation import validate_local_skill
 
 if TYPE_CHECKING:
@@ -58,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("skill_name", nargs="?")
     install_parser.add_argument("--all", action="store_true", dest="install_all")
     install_parser.add_argument("--force", action="store_true")
+    uninstall_parser = subparsers.add_parser(
+        "uninstall", help="Remove a personal skill link from ~/.agents/skills."
+    )
+    uninstall_parser.add_argument("skill_name")
     return parser
 
 
@@ -101,6 +106,20 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
     elif command == "install":
         with mutation_lock(get_state_home()):
             return _run_install(args, output, error_output)
+    elif command == "uninstall":
+        with mutation_lock(get_state_home()):
+            result = uninstall_skill(args.skill_name, read_repository_config(allow_missing=True))
+        if result.skipped:
+            error_output.write(
+                f"[WARN] Skipped uninstall; existing content preserved: {result.path}\n"
+            )
+        else:
+            action = "Uninstalled skill" if result.changed else "Skill link already absent"
+            output.write(f"{action}: {result.name}\npath: {result.path}\n")
+        error_output.writelines(
+            f"[WARN] Uninstalled; inspect remaining cleanup files: {path}\n"
+            for path in result.cleanup_paths
+        )
     else:
         msg = f"Unhandled command: {command}"
         raise SkillSyncError(msg)

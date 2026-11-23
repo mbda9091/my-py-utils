@@ -85,6 +85,7 @@ def test_help_only_exposes_local_management_commands(capsys: pytest.CaptureFixtu
         "init",
         "add",
         "install",
+        "uninstall",
         "list",
         "status",
         "validate",
@@ -138,6 +139,8 @@ def test_all_local_commands_only_execute_fixed_readonly_root_checks(
         ["install", "--all"],
         ["list"],
         ["status"],
+        ["uninstall", "absorbed-skill"],
+        ["install", "absorbed-skill"],
         ["validate", str(manual)],
     ):
         assert main(args) == 0

@@ -140,7 +140,7 @@ alone never authorize replacement; `--force` explicitly authorizes backing up
 the selected current entry. A link already resolving to the current personal
 skill may be normalized without force.
 
-`init`, `add`, and `install` share a process lock in the state directory. Concurrent
+`init`, `add`, `install`, and `uninstall` share a process lock in the state directory. Concurrent
 commands wait until the current read/modify/write operation, including rollback,
 finishes. Batch installation holds the lock for the batch. This prevents lost
 installation records and races with repository rebinding. The lock file remains
@@ -156,6 +156,27 @@ failures, such as invalid descriptors, missing skills or link/write errors.
 Each skill is validated inside its own installation attempt: a malformed
 `SKILL.md` counts as one failure and does not block other skills. Conflicts alone
 return success with warnings. It only enumerates the configured personal repository.
+
+## Uninstall a personal skill
+
+```bash
+skill-sync uninstall foo
+```
+
+This removes only the verified personal link at the current user's
+`~/.agents/skills/foo` and its matching installation record. The repository skill,
+other use paths created by `add`, and persistent collision backups stay intact.
+Uninstalling twice succeeds. Known broken links can be removed even after the
+skill or entire configured repository has disappeared. A verified recorded link
+to a previously bound repository can also be uninstalled without touching its
+source. Unknown links, aliases, real directories and third-party replacements
+are preserved with warnings; old records alone never authorize deleting them.
+
+Links are captured privately before removal. A record-write failure restores the
+link; failed recovery preserves its private container and reports the path. After
+records commit, cleanup failure reports remaining files as a warning. To restore
+a force-install backup, verify and uninstall the installed link, then move the
+backup's `original` to the original path recorded in `backup.json`.
 
 ## Discovery and installation records
 
@@ -206,7 +227,7 @@ Existing `skill-sync.json` files are retained and ignored by local management.
 
 ## Git workflow
 
-The CLI supports `init`, `add`, `install`, `list`, `status`, and `validate`.
+The CLI supports `init`, `add`, `install`, `uninstall`, `list`, `status`, and `validate`.
 The earlier `publish` and `sync` commands have been removed. Old invocations
 exit with a migration message before loading configuration or running a process.
 The old remote-URL initialization and branch/identity flags are also rejected.
