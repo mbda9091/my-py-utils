@@ -98,6 +98,7 @@ def test_force_directory_failure_restores_original(
 
 ARGUMENT_ERROR = 2
 
+
 def test_force_unique_backups_and_fixed_home_cli(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -212,3 +213,20 @@ def test_force_skips_fifo_and_invalid_source_leaves_directory(tmp_path: Path) ->
     with pytest.raises(SkillSyncError):
         install_skill(source.name, config, force=True, target_root=root)
     assert (path / "keep").read_text() == "Keep"
+
+
+def test_first_install_reports_postcommit_cleanup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_personal_config(tmp_path)
+    source = write_skill(config.repository_path / "skills")
+    monkeypatch.setattr(
+        "skill_sync.links.shutil.rmtree", Mock(side_effect=OSError("cleanup denied"))
+    )
+    result = install_skill(source.name, config, target_root=tmp_path / "installed")
+    assert result.cleanup_path is not None
+    assert result.cleanup_path.name.startswith(".skill-sync-backup-")
+    assert (result.cleanup_path / "new-link").is_symlink()
+    assert result.path.readlink() == source
+    assert result.backup_path is None
+    assert read_managed_installations(config.state_home)[str(result.path)].source_path == source

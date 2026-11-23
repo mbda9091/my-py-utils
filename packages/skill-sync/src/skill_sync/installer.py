@@ -91,7 +91,7 @@ def _install_skill(
         if not committed:
             msg = f"Failed to link skill {destination}: {exc}"
             raise SkillSyncError(msg) from exc
-        cleanup_path = backup_root
+        cleanup_path = Path(exc.filename) if exc.filename is not None else backup_root
     return InstallResult(
         name,
         destination,

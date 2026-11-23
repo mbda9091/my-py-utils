@@ -111,9 +111,13 @@ explicitly selected skills and installs them as symlinks in the user
 `~/.agents/skills` directory. Preserve unrelated entries by default; an explicit
 `install --force` may replace a same-name ordinary entry only after preserving
 it in a persistent backup outside the discovery directory. Git staging, commits, branches, identity and
-remote synchronization belong to the user. The tool's only Git subprocess is
-a fixed read-only repository-root check; do not add generic Git execution or
-restore the removed `publish`/`sync` workflows.
+remote configuration belong to the user. Explicit `update` may run fixed read-only
+preflight queries and `git pull --ff-only --no-rebase --no-autostash
+--no-recurse-submodules` in the bound repository. Other commands may only run
+the fixed read-only repository-root check. Do not add generic Git execution,
+automatic staging, commits or pushes, or restore the removed `publish`/`sync`
+workflows. Install/uninstall always use the current user's `~/.agents/skills`;
+there is no target-selection flag.
 
 Keep v1 configuration and installation-record support read-only until explicit
 migration. Back up old state, preserve unresolved provenance, and never use

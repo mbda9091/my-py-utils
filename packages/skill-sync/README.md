@@ -140,7 +140,7 @@ alone never authorize replacement; `--force` explicitly authorizes backing up
 the selected current entry. A link already resolving to the current personal
 skill may be normalized without force.
 
-`init`, `add`, `install`, `uninstall`, and `remove` share a process lock in the state directory. Concurrent
+`init`, `add`, `install`, `uninstall`, `remove`, and `update` share a process lock in the state directory. Concurrent
 commands wait until the current read/modify/write operation, including rollback,
 finishes. Batch installation holds the lock for the batch. This prevents lost
 installation records and races with repository rebinding. The lock file remains
@@ -246,14 +246,15 @@ unversioned records can also be read without modification; their first update
 preserves a backup before writing schema v2.
 
 Prepare and compare a new repository yourself before changing the binding.
-Use `status` to inspect remaining old-source links. Standard Codex paths can be
-relinked using the verified `install --force` flow; arbitrary original paths
+Use `status` to inspect remaining old-source links. Standard user agents paths can be
+relinked using the backup-and-replace `install --force` flow; arbitrary original paths
 can be updated manually. Keep old content until all intended links are checked.
 Existing `skill-sync.json` files are retained and ignored by local management.
 
 ## Git workflow
 
-The CLI supports `init`, `add`, `install`, `uninstall`, `remove`, `list`, `status`, and `validate`.
+The CLI supports `init`, `add`, `install`, `uninstall`, `remove`, `update`, `list`,
+`status`, and `validate`.
 The earlier `publish` and `sync` commands have been removed. Old invocations
 exit with a migration message before loading configuration or running a process.
 The old remote-URL initialization and branch/identity flags are also rejected.
@@ -268,12 +269,39 @@ git -C ~/Code/my-skills commit -m "Update foo"
 git -C ~/Code/my-skills push
 ```
 
-The tool's only Git subprocess is a fixed `git --no-optional-locks rev-parse
---show-toplevel` check of the local working directory. It has no generic Git
-runner, publisher, network synchronization or identity configuration. `validate`
-checks skill structure; Git staging, commits, remotes and any commit checks are
-under your control. Read-only v1 migration remains available without restoring
-the old workflows.
+To explicitly pull the current branch of your configured personal repository:
+
+```bash
+skill-sync update
+```
+
+This runs `git pull --ff-only --no-rebase --no-autostash --no-recurse-submodules`
+with the branch's existing upstream. It requires a committed HEAD, a checked-out
+branch, an upstream, no unfinished Git operation, and a clean working tree
+(including non-ignored untracked files). Ignored caches do not block it.
+After `add` or `remove`, handle your local changes yourself before updating.
+Divergence stops the command without merging, rebasing, stashing or pushing.
+Already-current or locally-ahead branches succeed without discarding commits.
+Ordinary Git working trees and linked worktrees are supported.
+
+Existing skill links read fast-forwarded content immediately. New upstream skills
+are not automatically installed. Deleted or renamed skills can leave broken
+links; update warns about known affected paths, and uninstall/remove can clean
+them. Invalid skill descriptors or catalog structure produce warnings after a
+successful pull, without resetting Git. Configuration and installation records
+are not rewritten. Git failures report the actual current HEAD when available;
+a failed pull may still have fetched objects or remote refs, and the tool does
+not reset them. Authentication uses your normal Git environment. Repository-owned
+Git hooks/filters retain their normal behavior; they are not sandboxed by this CLI.
+
+Only `update` can run fixed Git preflight queries and this fixed pull. Other
+commands only run the read-only `git --no-optional-locks rev-parse --show-toplevel`
+root check. There is no generic Git runner, publisher or identity configuration.
+Git staging, commits, branches, remotes, pushes and commit checks stay under your
+control. Read-only v1 migration remains available without restoring old workflows.
+The legacy installation record `target` labels remain for schema compatibility;
+they do not select installation paths or authorize deletion.
 
 See the [personal repository plan](../../docs/skill-sync-personal-repository-plan.md)
-for implementation scope and acceptance records.
+and the [lifecycle plan](../../docs/skill-sync-lifecycle-plan.md) for implementation
+scope and acceptance records.

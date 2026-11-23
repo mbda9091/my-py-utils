@@ -25,8 +25,6 @@ from tests.skill_sync_helpers import (
 ARGPARSE_USAGE_ERROR = 2
 
 
-ARGUMENT_ERROR = 2
-
 def test_cli_init_and_status_use_configured_state_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -245,7 +243,7 @@ def test_cli_missing_skill_remains_an_error(
 def test_cli_install_requires_skill_name_or_all(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["install"])
-    assert exc.value.code == ARGUMENT_ERROR
+    assert exc.value.code == ARGPARSE_USAGE_ERROR
 
     output = capsys.readouterr()
     assert "Pass a skill name or --all, not both." in output.err

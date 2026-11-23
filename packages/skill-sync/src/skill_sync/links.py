@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 from contextlib import contextmanager
@@ -89,10 +90,15 @@ def link_directory(
             raise
     finally:
         if not preserve:
-            if committed and persistent_backup is not None:
-                new_link.unlink(missing_ok=True)
-            else:
-                shutil.rmtree(backup_root)
+            try:
+                if committed and persistent_backup is not None:
+                    new_link.unlink(missing_ok=True)
+                else:
+                    shutil.rmtree(backup_root)
+            except OSError as exc:
+                if committed:
+                    raise OSError(exc.errno or errno.EIO, str(exc), str(backup_root)) from exc
+                raise
 
 
 def _prepare_link(path: Path, source: Path) -> EntryState:

@@ -24,6 +24,9 @@ REMOVED_COMMANDS = [
     ["init", "--repo", "missing", "--branch", "main"],
     ["init", "--repo", "missing", "--git-name", "Old User", "--git-email", "old@example.com"],
     ["install", "--all", "--target", "unknown"],
+    ["uninstall", "demo-skill", "--target", "codex"],
+    ["remove", "demo-skill", "--target", "codex"],
+    ["update", "--target", "codex"],
 ]
 
 
@@ -87,6 +90,7 @@ def test_help_only_exposes_local_management_commands(capsys: pytest.CaptureFixtu
         "install",
         "uninstall",
         "remove",
+        "update",
         "list",
         "status",
         "validate",

@@ -15,6 +15,7 @@ from skill_sync.locking import mutation_lock
 from skill_sync.remover import remove_skill
 from skill_sync.repository import init_repository, read_repository_config
 from skill_sync.uninstaller import uninstall_skill
+from skill_sync.updater import update_repository
 from skill_sync.validation import validate_local_skill
 
 if TYPE_CHECKING:
@@ -69,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delete a repository skill including uncommitted files and its verified links.",
     )
     remove_parser.add_argument("skill_name")
+    subparsers.add_parser(
+        "update", help="Pull the bound personal repository with fast-forward only."
+    )
     return parser
 
 
@@ -78,7 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments and arguments[0] in {"publish", "sync"}:
         parser.error(
             f"{arguments[0]} has been removed. Manage Git commits and remotes yourself; "
-            "use add/install for local skill management."
+            "use add/install/uninstall/remove locally or update to pull the bound repository."
         )
     args = parser.parse_args(arguments)
     if args.command == "install" and (bool(args.skill_name) == bool(args.install_all)):
@@ -114,10 +118,26 @@ def _run_command(args: argparse.Namespace, output: TextIO, error_output: TextIO)
             return _run_install(args, output, error_output)
     elif command in {"uninstall", "remove"}:
         _run_removal(args, output, error_output)
+    elif command == "update":
+        _run_update(output, error_output)
     else:
         msg = f"Unhandled command: {command}"
         raise SkillSyncError(msg)
     return 0
+
+
+def _run_update(output: TextIO, error_output: TextIO) -> None:
+    with mutation_lock(get_state_home()):
+        config = read_repository_config()
+        output.write(f"Updating personal repository: {config.repository_path}\n")
+        output.flush()
+        result = update_repository(config)
+    action = (
+        "Already up to date" if result.before_head == result.after_head else "Updated repository"
+    )
+    output.write(f"{action}: {result.repository_path}\n")
+    output.write(f"HEAD before: {result.before_head}\nHEAD after: {result.after_head}\n")
+    error_output.writelines(f"[WARN] {warning}\n" for warning in result.warnings)
 
 
 def _run_removal(args: argparse.Namespace, output: TextIO, error_output: TextIO) -> None:
