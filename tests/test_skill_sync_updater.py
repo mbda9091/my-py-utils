@@ -10,6 +10,11 @@ import pytest
 from skill_sync.cli import main
 from skill_sync.config import config_path, installations_path
 from skill_sync.errors import SkillSyncError
+from skill_sync.installations import (
+    ManagedInstallation,
+    read_managed_installations,
+    write_managed_installations,
+)
 from skill_sync.installer import install_skill
 from skill_sync.repository import RepositoryConfig, init_repository, read_repository_config
 from skill_sync.uninstaller import uninstall_skill
@@ -211,6 +216,68 @@ def test_update_catalog_changes_warn_without_auto_install_or_record_rewrite(
     assert not (installed.parent / "fresh-skill").exists()
     assert installations_path(setup.config.state_home).read_bytes() == before
     assert uninstall_skill("demo-skill", setup.config).changed
+
+
+@pytest.mark.parametrize("entrypoint", ["api", "cli"])
+def test_update_warns_when_installed_skill_loses_descriptor(
+    update_setup: UpdateSetup, capsys: pytest.CaptureFixture[str], entrypoint: str
+) -> None:
+    setup = update_setup
+    installed = install_skill("demo-skill", setup.config).path
+    install_skill("demo-skill", setup.config, target_root=setup.config.state_home / "extra")
+    before_records = installations_path(setup.config.state_home).read_bytes()
+    before_config = config_path(setup.config.state_home).read_bytes()
+    upstream_skill = setup.upstream / "skills/demo-skill"
+    (upstream_skill / "helper.py").write_text("# Retained skill resource\n")
+    (upstream_skill / "SKILL.md").unlink()
+    push(setup.upstream, "Remove descriptor but keep skill resources")
+
+    if entrypoint == "api":
+        result = update_repository(setup.config)
+        assert result.before_head != result.after_head
+        warnings = result.warnings
+    else:
+        assert main(["update"]) == 0
+        output = capsys.readouterr()
+        assert "Updated repository:" in output.out
+        warnings = tuple(output.err.splitlines())
+    invalid = [warning for warning in warnings if "Invalid skill after Git update" in warning]
+    assert len(invalid) == 1
+    assert "demo-skill" in invalid[0]
+    assert "Missing SKILL.md" in invalid[0]
+    assert installed.is_symlink()
+    assert (installed / "helper.py").is_file()
+    assert not (installed / "SKILL.md").exists()
+    assert installations_path(setup.config.state_home).read_bytes() == before_records
+    assert config_path(setup.config.state_home).read_bytes() == before_config
+
+
+@pytest.mark.parametrize("provenance", ["unknown", "previous-repository"])
+def test_update_does_not_validate_drafts_from_unrelated_installation_records(
+    update_setup: UpdateSetup, provenance: str
+) -> None:
+    setup = update_setup
+    draft = setup.upstream / "skills/draft-skill"
+    draft.mkdir()
+    (draft / "helper.py").write_text("# Draft without a descriptor\n")
+    push(setup.upstream, "Add draft directory")
+    path = setup.config.state_home / "unrelated-link"
+    source = (
+        setup.config.state_home / "old-repository/skills/draft-skill"
+        if provenance == "previous-repository"
+        else None
+    )
+    record = ManagedInstallation("draft-skill", "local-path", path, source)
+    records = read_managed_installations(setup.config.state_home)
+    records[str(path)] = record
+    write_managed_installations(records, setup.config.state_home)
+    before = installations_path(setup.config.state_home).read_bytes()
+
+    result = update_repository(setup.config)
+
+    assert result.before_head != result.after_head
+    assert not result.warnings
+    assert installations_path(setup.config.state_home).read_bytes() == before
 
 
 @pytest.mark.parametrize("kind", ["symlink", "file"])

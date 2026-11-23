@@ -137,17 +137,23 @@ def _safe_git_error(message: str) -> str:
 
 def _collect_warnings(config: RepositoryConfig) -> list[str]:
     warnings: list[str] = []
+    records = read_managed_installations(config.state_home)
+    # Installed skills remain validation candidates even if their descriptor vanished.
+    names = {
+        record.skill
+        for record in records.values()
+        if record.source_path == config.repository_path / "skills" / record.skill
+    }
     try:
-        names = list_local_skill_names(config.repository_path)
+        names.update(list_local_skill_names(config.repository_path))
     except (OSError, SkillSyncError) as exc:
         warnings.append(f"Git updated successfully, but the skill catalog is invalid: {exc}")
-        names = []
-    for name in names:
+    for name in sorted(names):
         try:
             find_local_skill(config.repository_path, name)
         except (OSError, SkillSyncError) as exc:
             warnings.append(f"Invalid skill after Git update: {name}: {exc}")
-    for record in read_managed_installations(config.state_home).values():
+    for record in records.values():
         if record.source_path != config.repository_path / "skills" / record.skill:
             continue
         try:
