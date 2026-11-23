@@ -140,7 +140,7 @@ alone never authorize replacement; `--force` explicitly authorizes backing up
 the selected current entry. A link already resolving to the current personal
 skill may be normalized without force.
 
-`init`, `add`, `install`, and `uninstall` share a process lock in the state directory. Concurrent
+`init`, `add`, `install`, `uninstall`, and `remove` share a process lock in the state directory. Concurrent
 commands wait until the current read/modify/write operation, including rollback,
 finishes. Batch installation holds the lock for the batch. This prevents lost
 installation records and races with repository rebinding. The lock file remains
@@ -177,6 +177,32 @@ link; failed recovery preserves its private container and reports the path. Afte
 records commit, cleanup failure reports remaining files as a warning. To restore
 a force-install backup, verify and uninstall the installed link, then move the
 backup's `original` to the original path recorded in `backup.json`.
+
+## Remove a repository skill
+
+```bash
+skill-sync remove foo
+```
+
+This deletes the entire `<personal-skills-repo>/skills/foo` directory, including
+uncommitted and untracked files, and removes verified links at recorded use paths
+and the standard user agents path. It includes original links created by `add`.
+It does not restore the pre-add directory. Use `uninstall` to keep the source.
+Tracked deletions appear in your normal Git diff; the tool does not stage, commit
+or push them. Untracked deleted content cannot be recovered through Git.
+
+A broken or missing descriptor does not prevent removal. Missing source content
+and repeated removal are supported. Third-party replacements, unknown provenance
+and links to another personal repository are preserved; warnings name skipped
+entries. Unrecorded manual links elsewhere are not searched and may become broken.
+Persistent installation-collision backups remain intact. Symlinked skill roots
+and mounted subdirectories are rejected; internal symlinks are not followed.
+
+The source and verified links are captured before writing records. A pre-commit
+failure restores all captured entries; occupied recovery paths retain their
+recovery containers. Once records commit, a cleanup failure is a success with a
+warning naming the remaining container. Its content may already be partially
+removed, so it is not a promised full backup.
 
 ## Discovery and installation records
 
@@ -227,7 +253,7 @@ Existing `skill-sync.json` files are retained and ignored by local management.
 
 ## Git workflow
 
-The CLI supports `init`, `add`, `install`, `uninstall`, `list`, `status`, and `validate`.
+The CLI supports `init`, `add`, `install`, `uninstall`, `remove`, `list`, `status`, and `validate`.
 The earlier `publish` and `sync` commands have been removed. Old invocations
 exit with a migration message before loading configuration or running a process.
 The old remote-URL initialization and branch/identity flags are also rejected.

@@ -86,6 +86,7 @@ def test_help_only_exposes_local_management_commands(capsys: pytest.CaptureFixtu
         "add",
         "install",
         "uninstall",
+        "remove",
         "list",
         "status",
         "validate",
@@ -106,6 +107,7 @@ def test_all_local_commands_only_execute_fixed_readonly_root_checks(
     absorbed = write_skill(tmp_path / "external", "absorbed-skill")
     vendor = write_skill(home / ".agents/skills", "vendor-skill")
     vendor_before = snapshot(vendor)
+    write_skill(repository / "skills", "removable-skill")
     git_before = snapshot(repository / ".git")
     execute = subprocess.run
     calls: list[list[str]] = []
@@ -142,6 +144,7 @@ def test_all_local_commands_only_execute_fixed_readonly_root_checks(
         ["uninstall", "absorbed-skill"],
         ["install", "absorbed-skill"],
         ["validate", str(manual)],
+        ["remove", "removable-skill"],
     ):
         assert main(args) == 0
     assert calls
